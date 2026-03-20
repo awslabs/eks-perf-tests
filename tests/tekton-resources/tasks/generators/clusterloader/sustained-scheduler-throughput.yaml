@@ -150,4 +150,4 @@ spec:
       aws sts get-caller-identity
       # we expect to see all files from loadtest that clusterloader2 outputs here in this dir
       ls -larth
-      # aws s3 cp . s3://$S3_RESULT_PATH/  --recursive
+      aws s3 cp . s3://$S3_RESULT_PATH/  --recursive
