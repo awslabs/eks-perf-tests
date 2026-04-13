@@ -146,8 +146,16 @@ spec:
     workingDir: $(workspaces.results.path)
     script: |
       S3_RESULT_PATH=$(cat $(results.s3_result.path))
+      TIMESTAMP=$(basename "$S3_RESULT_PATH")
+      S3_BASE=$(dirname "$S3_RESULT_PATH")
+
       echo "S3 Path: $S3_RESULT_PATH"
       aws sts get-caller-identity
-      # we expect to see all files from loadtest that clusterloader2 outputs here in this dir
       ls -larth
-      aws s3 cp . s3://$S3_RESULT_PATH/  --recursive
+
+      # Upload each iteration folder as <timestamp>-<i>/artifacts/
+      for ((i=1; i<=$(params.iterations); i++)); do
+        if [ -d "$i" ]; then
+          aws s3 cp "$i" "s3://${S3_BASE}/${TIMESTAMP}-${i}/" --recursive
+        fi
+      done
