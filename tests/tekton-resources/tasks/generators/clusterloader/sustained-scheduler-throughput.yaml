@@ -106,7 +106,7 @@ spec:
       for ((i=1; i<=ITERATIONS; i++)); do
         echo "--- Starting iteration $i of $ITERATIONS ---"
 
-        ENABLE_EXEC_SERVICE=false ./clusterloader --kubeconfig=$KUBECONFIG --testconfig=$(workspaces.source.path)/kubernetes-iteration-toolkit/tests/assets/sustained-throughput/config.yaml --testoverrides=$(workspaces.source.path)/overrides.yaml --nodes=$(params.nodes) --provider=eks --report-dir=$(workspaces.results.path) --alsologtostderr --v=2
+        ENABLE_EXEC_SERVICE=false ./clusterloader --kubeconfig=$KUBECONFIG --testconfig=$(workspaces.source.path)/kubernetes-iteration-toolkit/tests/assets/sustained-throughput/config.yaml --testoverrides=$(workspaces.source.path)/overrides.yaml --nodes=$(params.nodes) --provider=eks --report-dir=$(workspaces.results.path)/${i} --alsologtostderr --v=2
 
         if [ $? -ne 0 ]; then
           echo "Iteration $i failed."
