@@ -5,7 +5,7 @@
 
 {{$SCHEDULER_THROUGHPUT_THRESHOLD := DefaultParam .CL2_SCHEDULER_THROUGHPUT_THRESHOLD 400}}
 
-name: direct-scheduler-throughput
+name: load
 namespace:
   number: 1
 tuningSets:

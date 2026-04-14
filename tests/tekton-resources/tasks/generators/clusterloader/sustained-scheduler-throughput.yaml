@@ -156,6 +156,6 @@ spec:
       # Upload each iteration folder as <timestamp>-<i>/artifacts/
       for ((i=1; i<=$(params.iterations); i++)); do
         if [ -d "$i" ]; then
-          aws s3 cp "$i" "s3://${S3_BASE}/${TIMESTAMP}-${i}/" --recursive
+          aws s3 cp "$i" "s3://${S3_BASE}/${TIMESTAMP}${i}/" --recursive
         fi
       done
