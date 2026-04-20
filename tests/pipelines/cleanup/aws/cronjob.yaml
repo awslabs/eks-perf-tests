@@ -1,0 +1,17 @@
+---
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: aws-account-cleanup
+  namespace: tekton-pipelines
+spec:
+  schedule: "0 0 */30 * *" # Triggers in every 30 days
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: curl
+            image: curlimages/curl
+            args: ["curl", "-X", "POST", "--data", "{}", "el-aws-account-cleanup.tekton-pipelines.svc.cluster.local:8080"]
+          restartPolicy: Never

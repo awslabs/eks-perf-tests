@@ -1,0 +1,44 @@
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: aws-account-cleanup
+  namespace: tekton-pipelines 
+spec:
+  params:
+    - name: aws-nuke-s3-config-path
+      description: S3 path for the aws nuke's config file.
+    - name: aws-account-alias
+      description: aws account alias for the account to be sweeped.
+  resourcetemplates:
+  - apiVersion: tekton.dev/v1beta1
+    kind: TaskRun
+    metadata:
+      name: aws-account-cleanup-runs-$(uid)
+    spec:
+      serviceAccountName: tekton-pipelines-executor
+      taskSpec:
+        description: |
+          Sweeps down an aws account for leftover resources, based on the config provided
+        workspaces:
+        - name: config
+        params:
+        - name: aws-nuke-s3-config-path
+          description: S3 path for the aws nuke's config file. i.e s3://dev-eks-rnshis/aws-nuke.yaml
+        - name: aws-account-alias
+          description: aws account alias for the account to be sweeped.
+        steps:
+        - name: download-config
+          image: amazon/aws-cli
+          script: |
+            aws s3 cp $(params.aws-nuke-s3-config-path) $(workspaces.config.path)/config.yaml
+        - name: sweep-aws-account
+          image: quay.io/rebuy/aws-nuke:v2.22.1
+          script: |
+            # TODO: Add --no-dry-run to start deleting the resources
+            echo "$(params.aws-account-alias)" | aws-nuke -c $(workspaces.config.path)/config.yaml
+      params:
+      - name: aws-nuke-s3-config-path
+        value: $(tt.params.aws-nuke-s3-config-path)
+      - name: aws-account-alias
+        value: $(tt.params.aws-account-alias)

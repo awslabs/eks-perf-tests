@@ -1,0 +1,47 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: cleanup-trigger
+  namespace: tekton-pipelines 
+spec:
+  schedule: "0 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          volumes:
+          - name: workspace
+            emptyDir: {}
+          containers:
+          - name: trigger
+            image: curlimages/curl
+            command:
+              - /bin/sh
+            args:
+              - -ce
+              - |
+                cat <<EOF > /workspace/post-body.json
+                {
+                  "trigger-template": "cleanup",
+                  "params": {
+                    "target": {
+                      "namespace": "$NAMESPACE"
+                    },
+                    "cleanup": {
+                        "keep": "$CLEANUP_KEEP"
+                    }
+                  }
+                }
+                EOF
+                curl -d @/workspace/post-body.json $SINK_URL
+            volumeMounts:
+            - mountPath: /workspace
+              name: workspace
+            env:
+              - name: SINK_URL
+                value: "http://el-tekton-cd.tekton-pipelines.svc.cluster.local:8080"
+              - name: NAMESPACE
+                value: "tekton-pipelines"
+              - name: CLEANUP_KEEP
+                value: "50"
+          restartPolicy: Never

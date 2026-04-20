@@ -1,0 +1,11 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: cleanup-details
+  namespace: tekton-pipelines 
+spec:
+  params:
+  - name: keep
+    value: $(body.params.cleanup.keep) 
+  - name: namespace
+    value: $(body.params.target.namespace)
