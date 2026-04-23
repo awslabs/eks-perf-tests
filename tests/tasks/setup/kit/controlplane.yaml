@@ -1,0 +1,152 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: control-plane-setup
+  namespace: tekton-pipelines
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.17.0"
+    tekton.dev/categories: Kubernetes
+    tekton.dev/tags: CLI, kubectl
+    tekton.dev/displayName: "kubernetes actions"
+    tekton.dev/platforms: "linux/amd64"
+spec:
+  description: |
+    Setup a kubernetes control plane in the guest cluster.
+  params:
+  - name: cluster-name
+    default: "guest"
+    description: Name of the guest cluster
+  - name: kubernetes-version
+    default: "1.24"
+    description: Kubernetes version for the guest cluster 
+  - name: apiserver-replicas
+    default: "1"
+    description: Number of APIserver replicas
+  - name: apiserver-image
+    default: ""
+    description: Image of apiserver
+  - name: apiserver-parameters
+    default: ""
+    description: |
+      Parameters of the apiserver. e.g. '["--goaway-chance=0.01"]'
+  - name: apiserver-instance-type
+    default: "m5.2xlarge"
+    description: Instance type for the apiserver
+  - name: etcd-replicas
+    default: "3"
+    description: Number of ETCD replicas
+  - name: etcd-image
+    default: ""
+    description: Image of ETCD
+  - name: etcd-parameters
+    default: ""
+    description: Parameters of the ETCD container
+  - name: etcd-instance-type
+    default: "m5.xlarge"
+    description: Instance type for the ETCD
+  - name: cni-version
+    default: "v1.9"
+    description: Version of the CNI to be installed
+  - name: aws-ebs-csi-driver-version
+    default: release-1.13
+    description: The release version for aws ebs csi driver.
+  workspaces:
+  - name: config
+    mountPath: /config/
+  steps:
+  - name: setup-control-plane
+    image: bitnami/kubectl:1.24.5 # curl was removed in more recent versions
+    script: |
+      #!/bin/bash
+      echo "Approving CSRs"
+      kubectl certificate approve $(kubectl get csr | grep "Pending" | awk '{print $1}')  2>/dev/null || true
+      namespace=$(kubectl get ns $(params.cluster-name) -o yaml 2>/dev/null | grep phase | awk '{print $2}')
+      if [[ $namespace != "Active" ]]
+      then
+        echo "Create namespace"
+        kubectl create namespace $(params.cluster-name)
+      fi
+      echo "Setting up control plane"
+      cat <<EOF > /tmp/controlplane.yaml 
+      apiVersion: kit.k8s.sh/v1alpha1
+      kind: ControlPlane
+      metadata:
+        name: $(params.cluster-name) # Desired Cluster name
+        namespace: $(params.cluster-name)
+      spec:
+        etcd:
+          replicas: $(params.etcd-replicas)
+          spec:
+            nodeSelector:
+              node.kubernetes.io/instance-type: $(params.etcd-instance-type)
+            containers:
+            - name: etcd
+      EOF
+      if [ -n "$(params.etcd-image)" ]; then
+        cat <<EOF >> /tmp/controlplane.yaml 
+              image: $(params.etcd-image)
+      EOF
+      fi
+      if [ -n "$(params.etcd-parameters)" ]; then
+        cat <<EOF >> /tmp/controlplane.yaml 
+              args: $(params.etcd-parameters)
+      EOF
+      fi
+      cat <<EOF >> /tmp/controlplane.yaml 
+        master:
+          apiServer:
+            replicas: $(params.apiserver-replicas)
+            spec:
+              nodeSelector:
+                node.kubernetes.io/instance-type: $(params.apiserver-instance-type)
+              containers:
+              - name: apiserver 
+      EOF
+      if [ -n "$(params.apiserver-image)" ]; then
+        cat <<EOF >> /tmp/controlplane.yaml 
+                image: $(params.apiserver-image)
+      EOF
+      fi
+      if [ -n "$(params.apiserver-parameters)" ]; then
+        cat <<EOF >> /tmp/controlplane.yaml 
+                args: $(params.apiserver-parameters)
+      EOF
+      fi
+      if [ -n "$(params.kubernetes-version)" ]; then
+        cat <<EOF >> /tmp/controlplane.yaml 
+        kubernetesVersion: "$(params.kubernetes-version)"
+      EOF
+      fi
+      kubectl apply -f /tmp/controlplane.yaml
+
+      echo "waiting for controlplane to be ready" 
+      while true; do
+        status0=$(kubectl get -f /tmp/controlplane.yaml -o jsonpath='{.status.conditions[0].status}')
+        status1=$(kubectl get -f /tmp/controlplane.yaml -o jsonpath='{.status.conditions[1].status}')
+        if [[ "$status0" == "True" ]] && [[ "$status1" == "True" ]]; then
+          echo "controlplane is ready"
+          break
+        fi
+      done
+      kubectl get -f /tmp/controlplane.yaml  -o yaml
+  - name: retrieve-kubeconfig
+    image: bitnami/kubectl
+    script: |
+      echo $(workspaces.config.path)
+      ls -ld $(workspaces.config.path)
+      kubectl get secret -n $(params.cluster-name) $(params.cluster-name)-kube-admin-config -ojsonpath='{.data.config}' | base64 -d > $(workspaces.config.path)/kubeconfig
+      # TODO: remove debug
+      cat $(workspaces.config.path)/kubeconfig
+      # sanity check to ensure it's live.
+      kubectl --kubeconfig $(workspaces.config.path)/kubeconfig version
+  - name: install-cni
+    image: bitnami/kubectl
+    script: |
+      kubectl --kubeconfig=$(workspaces.config.path)/kubeconfig apply -f https://raw.githubusercontent.com/aws/amazon-vpc-cni-k8s/master/config/$(params.cni-version)/aws-k8s-cni.yaml
+  - name: install-csi-driver
+    image: bitnami/kubectl
+    script: |
+      kubectl --kubeconfig=$(workspaces.config.path)/kubeconfig apply -k "github.com/kubernetes-sigs/aws-ebs-csi-driver/deploy/kubernetes/overlays/stable/?ref=$(params.aws-ebs-csi-driver-version)"
+
+

@@ -1,0 +1,101 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: data-plane-setup
+  namespace: tekton-pipelines
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.17.0"
+    tekton.dev/categories: Kubernetes
+    tekton.dev/tags: CLI, kubectl
+    tekton.dev/displayName: "kubernetes actions"
+    tekton.dev/platforms: "linux/amd64"
+spec:
+  description: |
+    Setup a kubernetes data plane in the guest cluster.
+  params:
+  - name: cluster-name
+    default: "guest"
+    description: Name of the guest cluster
+  - name: dataplane-name
+    default: ""
+    description: Optional name of the dataplane object.
+  - name: desired-nodes
+    default: "10"
+    description: The desired number of nodes in the cluster.
+  - name: min-nodes
+    default: "1"
+    description: The minimum number of nodes in the cluster nodegroup.
+  - name: max-nodes
+    default: "1000"
+    description: The maximum number of nodes in the cluster nodegroup.
+  - name: instance-types
+    default: '["c5.large","m5.large","r5.large","t3.large","t3a.large","c5a.large","m5a.large","r5a.large"]'
+    description: The desired instance types of the node group.
+  workspaces:
+  - name: config
+    mountPath: /config/
+  steps:
+  - name: setup-data-plane
+    image: bitnami/kubectl:1.24.5
+    script: |
+      #!/bin/bash
+      set -e
+      echo "Getting subnet and security group tags"
+      TAG=$(kubectl get provisioner -oyaml | grep karpenter.sh/discovery | awk 'NR==1{ print $2}')
+      echo "Setting up data plane"
+      max_nodes=$(params.max-nodes)
+      nodes=$(params.desired-nodes)
+      asgs=$((nodes/max_nodes))
+      echo "node groups: $asgs"
+      if [ -z "$(params.dataplane-name)" ]
+      then
+        dp_name=$(params.cluster-name)-nodes
+      else
+        dp_name=$(params.dataplane-name)
+      fi
+
+      create_dp_nodes()
+      {
+        dataplane_name=$dp_name-$1
+        EC2_INSTANCES=$3
+        cat <<EOF >> /tmp/dp.yaml
+      apiVersion: kit.k8s.sh/v1alpha1
+      kind: DataPlane
+      metadata:
+        name: $dataplane_name
+        namespace: $(params.cluster-name)
+      spec:
+        clusterName: $(params.cluster-name) # Associated Cluster name
+        nodeCount: $2
+        instanceTypes: $EC2_INSTANCES
+        subnetSelector:
+          karpenter.sh/discovery: ${TAG}
+      EOF
+        kubectl apply -f /tmp/dp.yaml
+        echo "Created dataplane object $dataplane_name"
+
+        echo "waiting for dataplane"
+        while true; do
+          status0=$(kubectl get -f /tmp/dp.yaml -o jsonpath='{.status.conditions[0].status}')
+          status1=$(kubectl get -f /tmp/dp.yaml -o jsonpath='{.status.conditions[1].status}')
+          if [[ "$status0" == "True" ]] && [[ "$status1" == "True" ]]; then
+            echo "controlplane is ready"
+            break
+          fi
+        done
+      }
+
+      for i in $(seq 1 $asgs)
+      do
+        # dataplane object is backed by ASG which has a cap for the max # of nodes per ASG
+        create_dp_nodes $i $max_nodes $(params.instance-types)
+      done
+
+      remaining_nodes=$(((nodes)%max_nodes))
+      echo "remaining nodes: $remaining_nodes"
+      if [[ $remaining_nodes -gt 0 ]]
+      then
+        echo "The remaining_nodes var is greater than 0."
+        create_dp_nodes 0 $remaining_nodes $(params.instance-types)
+      fi

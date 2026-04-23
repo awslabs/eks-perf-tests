@@ -1,0 +1,40 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: kit-cl2-load-example-run
+  namespace: tekton-pipelines
+spec:
+  timeout: "12h"
+  workspaces:
+    - name: source
+      emptyDir: {}
+    - name: results
+      emptyDir: {}
+    - name: config
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          storageClassName: kit-gp2
+          resources:
+            requests:
+              storage: 1Gi
+  params:
+    - name: name
+      value: "my-cluster-name"
+    - name: "results-bucket"
+      value: "my-bucket"
+    - name: "node_count"
+      value: "100"
+    - name: "amp-workspace-id"
+      value: "my-AMP-workspace"
+  podTemplate:
+    nodeSelector:
+      kubernetes.io/arch: amd64
+    # TODO: The mounted EBS PV is only writable to root, ideally we should avoid to run containers as root.
+    securityContext:
+      runAsNonRoot: false
+      runAsUser: 0
+  serviceAccountName: tekton-pipelines-executor
+  pipelineRef:
+    name: kit-cl2-load
