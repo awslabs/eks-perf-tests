@@ -401,6 +401,18 @@ spec:
     taskRef:
       kind: Task
       name: cloudwatch
+  - name: install-fluentbit-addon
+    params:        
+    - name: cluster-name
+      value: $(params.cluster-name)
+    runAfter:        
+      - cw-metrics
+    taskRef:        
+      kind: Task
+      name: eks-addon-fluentbit
+    workspaces:        
+      - name: config
+        workspace: config
   workspaces:
   - name: source
   - name: results
