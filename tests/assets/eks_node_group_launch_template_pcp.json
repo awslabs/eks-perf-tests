@@ -1,0 +1,73 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Create an EKS Node Group Launch Template",
+    "Parameters": {
+        "LaunchTemplateName": {
+            "Type": "String",
+            "Description": "Name of the Launch Template"
+        },
+        "ClusterName": {
+            "Type": "String",
+            "Description": "Name of the Cluster"
+        },
+        "SSHKeyName": {
+            "Type": "String",
+            "Description": "SSH Key Name for EC2 instances"
+        }
+    },
+    "Resources": {
+        "NodeGroupLaunchTemplate": {
+            "Type": "AWS::EC2::LaunchTemplate",
+            "Properties": {
+                "LaunchTemplateName": { "Ref": "LaunchTemplateName" },
+                "LaunchTemplateData": {
+                    "KeyName": { "Ref": "SSHKeyName" },
+                    "BlockDeviceMappings": [
+                        {
+                            "DeviceName": "/dev/xvda",
+                            "Ebs": {
+                                "VolumeSize": 20,
+                                "VolumeType": "gp2"
+                            }
+                        }
+                    ],
+                    "MetadataOptions": {
+                        "HttpPutResponseHopLimit": 2,
+                        "HttpEndpoint": "enabled",
+                        "HttpTokens": "required"
+                    },
+                    "UserData": {
+                        "Fn::Base64": {
+                            "Fn::Join": ["\n", [
+                                "Content-Type: multipart/mixed; boundary=\"BOUNDARY\"",
+                                "MIME-Version: 1.0",
+                                "",
+                                "--BOUNDARY",
+                                "Content-Type: application/node.eks.aws",
+                                "MIME-Version: 1.0",
+                                "",
+                                "---",
+                                "apiVersion: node.eks.aws/v1alpha1",
+                                "kind: NodeConfig",
+                                "spec:",
+                                "  cluster:",
+                                {"Fn::Sub": "    name: ${ClusterName}"},
+                                "  kubelet:",
+                                "    config:",
+                                "      maxPods: 250",
+                                "",
+                                "--BOUNDARY--"
+                            ]]
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "Outputs": {
+        "NodeGroupLaunchTemplateName": {
+            "Description": "Name of the Node Group Launch Template",
+            "Value": { "Ref": "NodeGroupLaunchTemplate" }
+        }
+    }
+}

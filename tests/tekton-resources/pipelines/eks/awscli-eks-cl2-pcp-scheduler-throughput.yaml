@@ -28,7 +28,7 @@ spec:
   - name: slack-message
   - name: vpc-cfn-url
   - name: ng-cfn-url
-    default: "https://raw.githubusercontent.com/awslabs/kubernetes-iteration-toolkit/main/tests/assets/eks_node_group_launch_template.json"
+    default: "https://raw.githubusercontent.com/awslabs/eks-perf-tests/refs/heads/main/tests/assets/eks_node_group_launch_template_pcp.json"
     type: string
   - name: kubernetes-version
     default: "1.33"
