@@ -1,0 +1,62 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: awscli-eks-cluster-teardown-pod-identity
+  namespace: scalability
+spec:
+  description: |
+    Teardown an EKS cluster Pod Identity resources.
+  params:
+  - name: cluster-name
+    description: The name of the EKS cluster whose Pod Identity resources will be teared down.
+  - name: region
+    default: us-west-2
+    description: The region where the cluster is in.
+  - name: endpoint
+    default: ""
+  - name: namespace-count
+    description: The number of namespaces for EKS Pod Identity test.
+    default: "0"
+  - name: slack-hook
+    default: ""
+  - name: slack-message
+    default: "Job is completed"
+  - name: service-role-stack-name
+  - name: node-role-stack-name
+  - name: launch-template-stack-name
+  steps:
+  - name: delete-cluster-pod-identity
+    image: alpine/k8s:1.23.7
+    script: |
+      set +e
+
+      for i in $(seq 1 $(params.namespace-count)); do
+        PIA_ROLE_NAME=$(params.cluster-name)-pia-role-$i
+        PIA_ROLE_EXISTS=$(aws iam get-role --role-name $PIA_ROLE_NAME --query 'Role.RoleName' --output text 2>/dev/null)
+        if [ "$PIA_ROLE_EXISTS" == "$PIA_ROLE_NAME" ]; then
+          # Detach all attached managed policies
+          aws iam list-attached-role-policies --role-name "$PIA_ROLE_NAME" \
+            --query 'AttachedPolicies[*].PolicyArn' --output json | jq -r '.[]' | while read -r policy_arn; do
+            echo "Detaching managed policy: $policy_arn"
+            aws iam detach-role-policy --role-name "$PIA_ROLE_NAME" --policy-arn "$policy_arn"
+          done
+          # Delete all inline policies
+          aws iam list-role-policies --role-name "$PIA_ROLE_NAME" \
+            --query 'PolicyNames' --output json | jq -r '.[]' | while read -r policy_name; do
+            echo "Deleting inline policy: $policy_name"
+            aws iam delete-role-policy --role-name "$PIA_ROLE_NAME" --policy-name "$policy_name"
+          done
+          # Delete role
+          aws iam delete-role --role-name $PIA_ROLE_NAME
+          echo "Role $PIA_ROLE_NAME deleted successfully."
+        else
+          echo "Role $PIA_ROLE_NAME does not exist, no action needed."
+        fi
+      done
+  - name: send-slack-notification
+    image: alpine/k8s:1.23.7
+    script: |
+      if [ -n "$(params.slack-hook)" ]; then
+        curl -H "Content-type: application/json" --data '{"Message": "$(params.slack-message)"}' -X POST  $(params.slack-hook)
+      fi
