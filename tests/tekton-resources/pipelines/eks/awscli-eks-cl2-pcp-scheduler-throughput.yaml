@@ -227,6 +227,8 @@ spec:
       value: $(params.kubernetes-version)
     - name: metric-name
       value: $(params.metric-name)
+    - name: run-id
+      value: $(context.pipelineRun.name)
     runAfter:
       - generate
     taskRef:
