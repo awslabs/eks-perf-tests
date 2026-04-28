@@ -21,9 +21,15 @@ spec:
       description: "The unit of the metrics"
     - name: value
       description: "The value for the metric"
+    - name: run-id
+      description: "Pipeline runId required for populating runId dimension to be queried for dashboards later"
+      default: ""
   steps:
   - name: cw-emit
     image: amazon/aws-cli
     script: |
       aws sts get-caller-identity
       aws cloudwatch --region $(params.region) put-metric-data --metric-name $(params.metric-name) --namespace $(params.namespace) --dimensions Nodes=$(params.dimensions) --unit $(params.unit) --value $(params.value) 
+      if [ -n "$(params.run-id)" ]; then
+        aws cloudwatch --region $(params.region) put-metric-data --metric-name $(params.metric-name) --namespace $(params.namespace) --dimensions Nodes=$(params.dimensions),RunId=$(params.run-id) --value $(params.value)
+      fi
