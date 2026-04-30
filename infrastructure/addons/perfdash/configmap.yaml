@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: perfdash-config
+  namespace: perfdash
+data:
+  AWS_DEFAULT_REGION: us-west-2
+  AWS_REGION: us-west-2
+  PERFDASH_LOG_BUCKET: "${RESULTS_BUCKET}"
+  jobs.yaml: |
+    periodicJobs: []

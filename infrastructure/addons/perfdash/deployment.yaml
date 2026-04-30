@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perfdash
+  namespace: perfdash
+  labels:
+    app: perfdash
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perfdash
+  template:
+    metadata:
+      labels:
+        app: perfdash
+    spec:
+      serviceAccountName: perfdash
+      containers:
+        - name: perfdash
+          image: gcr.io/k8s-staging-perf-tests/perfdash:2.56
+          command:
+            - /perfdash
+            - --www=true
+            - --dir=/www/
+            - --address=0.0.0.0:8080
+            - --builds=100
+            - --force-builds
+            - --mode=s3
+            - --aws-region=us-west-2
+            - --configPath=/etc/config/jobs.yaml
+            - --logsBucket=$(PERFDASH_LOG_BUCKET)
+            - --logsPath=
+            - --storageURL=NotSupported
+            - --allow-parsers-matching-all-tests=true
+          env:
+            - name: PERFDASH_LOG_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: perfdash-config
+                  key: PERFDASH_LOG_BUCKET
+            - name: AWS_DEFAULT_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: perfdash-config
+                  key: AWS_DEFAULT_REGION
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: perfdash-config
+                  key: AWS_REGION
+          ports:
+            - containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 300
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/config
+      volumes:
+        - name: config-volume
+          configMap:
+            name: perfdash-config

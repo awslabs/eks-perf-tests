@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tekton-ingress
+  namespace: tekton-pipelines
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: "${CERT_ARN}"
+    alb.ingress.kubernetes.io/auth-type: oidc
+    alb.ingress.kubernetes.io/auth-idp-oidc: '${FEDERATE_OIDC_CONFIG}'
+    alb.ingress.kubernetes.io/auth-on-unauthenticated-request: authenticate
+    external-dns.alpha.kubernetes.io/hostname: "${TEKTON_DOMAIN}"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: "${TEKTON_DOMAIN}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tekton-dashboard
+                port:
+                  number: 9097
+
