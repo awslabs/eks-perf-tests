@@ -1,0 +1,13 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: Bucket
+metadata:
+  name: tekton-operator
+  namespace: flux-system
+spec:
+  bucketName: tekton-releases
+  endpoint: storage.googleapis.com
+  provider: generic
+  interval: 1h
+  ignore: |
+    /*
+    !/operator/previous/v0.77.0/release.yaml

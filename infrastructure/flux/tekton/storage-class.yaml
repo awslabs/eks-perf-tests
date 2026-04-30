@@ -1,0 +1,13 @@
+# EKS Auto Mode requires ebs.csi.eks.amazonaws.com (NOT ebs.csi.aws.com).
+# Without this, Tekton Results Postgres PVC stays Pending forever.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ebs-gp3
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.eks.amazonaws.com
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+parameters:
+  type: gp3
