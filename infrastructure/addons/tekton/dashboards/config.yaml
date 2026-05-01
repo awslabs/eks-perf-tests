@@ -4,8 +4,12 @@ metadata:
   name: config
 spec:
   profile: all
+  chain:
+    disabled: true
   pipeline:
     default-timeout-minutes: 240
     default-task-run-workspace-binding: "emptyDir: {}"
   dashboard:
     readonly: false
+  hub:
+    options: {}
