@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: perfdash-ingress
+  namespace: perfdash
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: "${CERT_ARN}"
+    alb.ingress.kubernetes.io/auth-type: oidc
+    alb.ingress.kubernetes.io/auth-idp-oidc: '${FEDERATE_OIDC_CONFIG}'
+    alb.ingress.kubernetes.io/auth-on-unauthenticated-request: authenticate
+    external-dns.alpha.kubernetes.io/hostname: "${PERFDASH_DOMAIN}"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: "${PERFDASH_DOMAIN}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: perfdash
+                port:
+                  number: 8080

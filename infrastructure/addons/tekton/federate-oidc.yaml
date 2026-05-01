@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: federate-oidc-secret
+  namespace: tekton-pipelines
+type: Opaque
+stringData:
+  clientId: "${clientId}"
+  clientSecret: "${clientSecret}"
