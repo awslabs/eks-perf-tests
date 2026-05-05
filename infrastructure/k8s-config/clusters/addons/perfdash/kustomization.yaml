@@ -1,8 +1,0 @@
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-# This 2 files pin to a upstream config. To upgrade, simply use a newer commit ID from upstream.
-resources:
-- https://raw.githubusercontent.com/kubernetes/perf-tests/4c08d581d7196071891095a0d442f7cd3e9d3d3d/perfdash/deployment.yaml
-- https://raw.githubusercontent.com/kubernetes/perf-tests/4c08d581d7196071891095a0d442f7cd3e9d3d3d/perfdash/perfdash-service.yaml
-patchesStrategicMerge:
-- deployment-patch.yaml

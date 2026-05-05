@@ -1,33 +1,140 @@
-[![kitctl](https://github.com/awslabs/kubernetes-iteration-toolkit/actions/workflows/kitctl-test.yml/badge.svg)](https://github.com/awslabs/kubernetes-iteration-toolkit/actions/workflows/kitctl-test.yml) **`kitctl`** test coverage when new modifications are committed to this repository
+# EKS Performance Tests
 
-# What is Kubernetes Iteration Toolkit?
+This repository contains the infrastructure, test definitions, and automation for running EKS scalability and performance tests at scale.
 
-## What is KIT?
+## Repository Structure
 
-[KIT](https://github.com/awslabs/kubernetes-iteration-toolkit) is a set of decoupled tools designed to accelerate the development of Kubernetes through testing. It combines a variety of open source projects to define an opinionated way to rapidly configure and test Kubernetes components on AWS.
+```
+├── infrastructure/
+│   ├── addons/             GitOps-managed cluster addons (Tekton, Flux UI, PerfDash, ACK)
+│   └── README.md           Infrastructure setup and architecture details
+├── tests/
+│   ├── tekton-resources/
+│   │   ├── tasks/          Reusable Tekton Tasks (cluster setup, load generation, teardown)
+│   │   ├── pipelines/      End-to-end test pipeline definitions
+│   ├── assets/             Launch templates, VPC configs, IAM policies
+│   └── images/             Container images for test tooling
+└── docs/
+```
 
-## Why did we build KIT?
+## How It Works
 
-The EKS Scalability team is responsible for improving performance across the Kubernetes stack. We started our journey by manually running tests against modified dev clusters. This helped us to identify some bottlenecks, but results were difficult to demonstrate and reproduce. We wanted to increase the velocity of our discoveries, as well as our confidence in our results. We set out to build automation to help us configure cluster components, execute well known test workloads, and analyze the results. This evolved into KIT, and we’re ready to share it to help accelerate testing in other teams.
+1. **Management Cluster** — An EKS Auto Mode cluster runs Tekton Pipelines, managed via Flux GitOps from this repo. See [infrastructure/README.md](infrastructure/README.md) for details.
 
-## What can I do with KIT?
+2. **Test Pipelines** — Tekton Pipelines orchestrate the full test lifecycle:
+   - Create an EKS cluster under test (CUT)
+   - Configure addons and node groups
+   - Run [ClusterLoader2](https://github.com/kubernetes/perf-tests/tree/master/clusterloader2) workloads
+   - Collect metrics and upload results to S3
+   - Tear down the CUT
 
-KIT can help you run scale tests against a KIT cluster or an EKS cluster, collect logs and metrics from the cluster control plane and nodes to help analyze the performance for a Kubernetes cluster. KIT comes with a set of tools like Karpenter, ELB controller, Prometheus, Grafana and Tekton etc. installed and configured to manage cluster lifecycle, run tests and collect results.
+3. **Continuous Execution** — Tekton Triggers schedule tests on a recurring basis. Results are visualized in PerfDash
 
-## What are KIT Environments?
+4. **GitOps Delivery** — All changes (new tests, addon updates, alarm definitions) are delivered by pushing to this repo. Flux reconciles the cluster state automatically.
 
-KIT Environments provide an opinionated testing environment with support for test workflow execution, analysis, and observability. Developers can use `kitctl` cli to create a personal or shared testing environment for oneshot or periodic tests. KIT Environments consists of a management Kubernetes cluster that come preinstalled with a suite of Kubernetes operators that enable the execution of the tests, help analyse the test results easily, and persists logs and control plane metrics for the test runs.
+## Quick Start
 
-Additionally, KIT Environments provide a library of predefined [Tasks](https://github.com/awslabs/kubernetes-iteration-toolkit/tree/c6925e3db92ae909cafb2751b153dd8221d6fd55/tests/tasks) to configure clusters, generate load, and analyze results. For example, you can combine the “MegaXL KIT cluster” task and “upstream pod density load generator” task to reproduce the scalability team’s MegaXL test results. You can then swap in the “EKS Cluster” task and verify the results as improvements are merged into EKS. You can also parameterize existing tasks or define your own to meet your use cases.
+### View test runs
 
-## What are KIT clusters?
+```bash
+aws eks update-kubeconfig --name <cluster-name> --region us-west-2
+kubectl get pipelineruns -n scalability
+```
 
-KIT clusters enables developers to declaratively configure eks-like clusters with arbitrary modifications. Using a Kubernetes CRD, you can modify the EC2 instance types, container image, environment variables, or command line arguments of any cluster component. These configurations can be [checked into git](https://github.com/awslabs/kubernetes-iteration-toolkit/blob/main/operator/docs/examples/cluster-1.21.yaml) and reproduced for periodic regression testing or against new test scenarios.
+### Start a test manually
 
-KIT clusters are implemented using Kubernetes primitives like deployments, statefulsets, and services. More advanced use cases can be achieved by implementing a new feature in the [KIT cluster Operator](https://github.com/awslabs/kubernetes-iteration-toolkit/tree/main/operator) and exposing it as a new parameter in the CRD. You can install the KIT cluster Operator on any Kubernetes cluster or with `kitctl bootstrap`.
+Use a sample PipelinRun like below, use parameters/pipelineRef from the test you are running:
 
-## How do I get started with KIT?
+```yaml
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: modheer-scheduler-tier-xl-100k-metrics3
+  namespace: scalability
+spec:
+  pipelineRef:
+      name: awscli-eks-cl2-pcp-scheduler-throughput
+  timeouts:
+    pipeline: 9h0m0s
+    tasks: 8h30m0s
+  workspaces:
+      - name: source
+        emptyDir: {}
+      - name: config
+        volumeClaimTemplate:
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            storageClassName: gp2
+            resources:
+              requests:
+                storage: 1Gi
+      - name: results
+        emptyDir: {}
+  params:
+    - name: cluster-name
+      value: "awscli-eks-throughput-1k-xl-metrics3"
+    - name: endpoint
+      value: "https://api.beta.us-west-2.wesley.amazonaws.com"
+    - name: desired-nodes
+      value: "10"
+    - name: cl2-throughput-pods
+      value: 15
+    - name: cl2-throughput-threshold
+      value: 1
+    - name: cl2-default-qps
+      value: 167
+    - name: cl2-default-burst
+      value: 167
+    - name: cl2-uniform-qps
+      value: 167
+    - name: results-bucket
+      value: kit-eks-perflab/kit-eks-1k/$(date +%s)
+    - name: slack-hook
+      value: ""
+    - name: slack-message
+      value: "You can monitor here - https://tekton.scalability.eks.aws.dev/#/namespaces/tekton-pipelines/pipelineruns ;5k node "
+    - name: vpc-cfn-url
+      value: "https://raw.githubusercontent.com/awslabs/kubernetes-iteration-toolkit/main/tests/assets/amazon-eks-vpc.json"
+    - name: kubernetes-version
+      value: "1.34"
+    - name: control-plane-tier
+      value: "tier-xl"
+    - name: metric-name
+      value: "pcp-throughput-xl"
+    - name: iterations
+      value: 3
+  podTemplate:
+      nodeSelector:
+        kubernetes.io/arch: amd64
+  serviceAccountName: tekton-pipelines-executor
+```
 
-KIT-v0.1 (alpha) is available now. You can get started with kitctl by following these instructions [How To get started with KIT](/docs/how-to-use-kit.md)
+```bash
+kubectl apply -f pipeline-run.yaml
+```
 
-> Note: KIT is an alpha project things are changing and evolving rapidly. If you run into any issues, feel free to open an issue.
+### Monitor via Dashboard
+
+Access the Tekton Dashboard at the cluster's ingress URL to view pipeline runs, logs, and task status.
+
+## Test Types
+
+| Test | Description | Scale |
+|------|-------------|-------|
+| Load test (CL2) | Full cluster load with SLO validation | 5,000 nodes |
+| PCP throughput | Control plane throughput benchmarks | 1,000 nodes |
+
+## Contributing
+
+- **New test**: Add a Task under `tests/tekton-resources/tasks/` and a Pipeline under `tests/tekton-resources/pipelines/`
+- **New addon**: Add a directory under `infrastructure/addons/` with a `kustomization.yaml`
+- **New trigger**: Add a trigger config under `tests/tekton-resources/triggers/`
+
+Push to the repo and Flux applies changes automatically.
+
+## Links
+
+- [Infrastructure Details](infrastructure/README.md)
+- [Test Definitions](tests/README.md)
+- [ClusterLoader2](https://github.com/kubernetes/perf-tests/tree/master/clusterloader2)
