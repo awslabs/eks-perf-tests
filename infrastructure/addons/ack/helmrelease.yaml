@@ -1,0 +1,20 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: ack-cloudwatch
+  namespace: ack-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: cloudwatch-chart
+      version: "1.4.3"
+      sourceRef:
+        kind: HelmRepository
+        name: ack-cloudwatch
+  values:
+    aws:
+      region: ${AWS_REGION}
+    serviceAccount:
+      annotations:
+        eks.amazonaws.com/role-arn: ${ACK_CLOUDWATCH_ROLE_ARN}
