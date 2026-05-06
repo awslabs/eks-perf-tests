@@ -396,6 +396,8 @@ spec:
       value: $(tasks.generate.results.datapoint)
     - name: namespace
       value: $(params.kubernetes-version)
+    - name: run-id
+      value: $(context.pipelineRun.name)
     runAfter:
     - generate
     taskRef:
