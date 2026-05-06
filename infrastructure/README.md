@@ -130,8 +130,6 @@ spec:
   params:
     - name: cluster-name
       value: "awscli-eks-throughput-1k-xl-metrics3"
-    - name: endpoint
-      value: "https://api.beta.us-west-2.wesley.amazonaws.com"
     - name: desired-nodes
       value: "10"
     - name: cl2-throughput-pods
@@ -145,7 +143,7 @@ spec:
     - name: cl2-uniform-qps
       value: 167
     - name: results-bucket
-      value: kit-eks-perflab/kit-eks-1k/$(date +%s)
+      value: <your-bucket-path>
     - name: slack-hook
       value: ""
     - name: slack-message

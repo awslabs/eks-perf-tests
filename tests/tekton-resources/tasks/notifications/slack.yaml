@@ -3,13 +3,14 @@ apiVersion: tekton.dev/v1beta1
 kind: Task
 metadata:
   name: slack-notification
-  namespace: scalability 
+  namespace: scalability
 spec:
   description: |
     sends slack notification for a given slack hook
   params:
   - name: slack-hook
-    description: The name of the EKS cluster you want to spin.
+    default: ''
+    description: Slack webhook URL. Skipped if empty or placeholder.
   - name: slack-message
     default: 'default'
     description: The message you want to post.
@@ -17,6 +18,9 @@ spec:
   - name: send-notification
     image: alpine/k8s:1.23.7
     script: |
-      if [ -n "$(params.slack-hook)" ]; then
-        curl -H "Content-type: application/json" --data '{"Message": "$(params.slack-message)"}' -X POST  $(params.slack-hook)
+      HOOK="$(params.slack-hook)"
+      if [ -n "$HOOK" ] && echo "$HOOK" | grep -q "^http"; then
+        curl -H "Content-type: application/json" --data '{"Message": "$(params.slack-message)"}' -X POST "$HOOK"
+      else
+        echo "No valid Slack webhook configured, skipping notification"
       fi
