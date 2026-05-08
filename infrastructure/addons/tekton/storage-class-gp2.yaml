@@ -1,0 +1,12 @@
+# Override the default gp2 StorageClass to use the EKS Auto Mode provisioner.
+# EKS creates gp2 with the legacy kubernetes.io/aws-ebs provisioner which
+# doesn't work on Auto Mode. This replaces it with ebs.csi.eks.amazonaws.com.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp2
+provisioner: ebs.csi.eks.amazonaws.com
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+parameters:
+  type: gp2

@@ -20,7 +20,20 @@ spec:
     image: alpine/k8s:1.23.7
     script: |
       curl -s $(params.vpc-cfn-url) -o ./amazon-vpc-eks
-      aws cloudformation --region $(params.region) deploy --stack-name $(params.stack-name)  --template-file ./amazon-vpc-eks
+      aws cloudformation --region $(params.region) deploy --stack-name $(params.stack-name) --template-file ./amazon-vpc-eks || {
+        # deploy may fail if waiter times out but stack is still creating, wait explicitly
+        echo "Deploy command failed, checking if stack is still in progress..."
+        STATUS=$(aws cloudformation describe-stacks --stack-name $(params.stack-name) --query "Stacks[0].StackStatus" --output text 2>/dev/null)
+        if [ "$STATUS" = "CREATE_IN_PROGRESS" ] || [ "$STATUS" = "UPDATE_IN_PROGRESS" ]; then
+          echo "Stack still in progress, waiting..."
+          aws cloudformation wait stack-create-complete --stack-name $(params.stack-name) --region $(params.region)
+        elif [ "$STATUS" = "CREATE_COMPLETE" ] || [ "$STATUS" = "UPDATE_COMPLETE" ]; then
+          echo "Stack already complete"
+        else
+          echo "Stack in unexpected state: $STATUS"
+          exit 1
+        fi
+      }
 
       VPC_ID=$(aws cloudformation describe-stacks --stack-name $(params.stack-name) --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" --output text)
 

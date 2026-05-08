@@ -45,6 +45,9 @@ spec:
         namespace: amazon-cloudwatch
       EOL
       kubectl apply -f ./fluentbit-configmap.yaml
-      kubectl apply -f https://raw.githubusercontent.com/aws-samples/amazon-cloudwatch-container-insights/latest/k8s-deployment-manifest-templates/deployment-mode/daemonset/container-insights-monitoring/fluent-bit/fluent-bit.yaml
-      kubectl patch daemonset fluent-bit -n amazon-cloudwatch -p='{"spec":{"template": {"spec":  {"tolerations": [{"key": "monitoring", "operator": "Equal", "value": "true", "effect": "NoSchedule"}]}}}}'
-      kubectl rollout status daemonset fluent-bit -n amazon-cloudwatch --timeout 5m
+      # Download and patch fluent-bit manifest to include monitoring toleration before applying
+      curl -s https://raw.githubusercontent.com/aws-samples/amazon-cloudwatch-container-insights/latest/k8s-deployment-manifest-templates/deployment-mode/daemonset/container-insights-monitoring/fluent-bit/fluent-bit.yaml -o ./fluent-bit.yaml
+      # Inject toleration so daemonset schedules on tainted monitoring nodes from the start
+      sed -i '/tolerations:/a\        - key: "monitoring"\n          operator: "Equal"\n          value: "true"\n          effect: "NoSchedule"' ./fluent-bit.yaml
+      kubectl apply -f ./fluent-bit.yaml
+      kubectl rollout status daemonset fluent-bit -n amazon-cloudwatch --timeout 10m

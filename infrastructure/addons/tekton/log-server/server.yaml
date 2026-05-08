@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: log-server-config
+  namespace: tekton-pipelines
+data:
+  server.js: |
+    const { S3Client, ListObjectsV2Command, GetObjectCommand } = require('@aws-sdk/client-s3');
+    const http = require('http');
+    const BUCKET = process.env.S3_BUCKET;
+    const s3 = new S3Client({ region: process.env.AWS_REGION || 'us-west-2' });
+
+    async function streamLogs(namespace, pod, container, res) {
+      try {
+        const prefix = 'logs/' + namespace + '/' + pod + '/' + container + '/';
+        const list = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: prefix }));
+        if (!list.Contents || list.Contents.length === 0) {
+          res.writeHead(404); res.end('No logs found'); return;
+        }
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        for (const obj of list.Contents.sort((a, b) => a.Key.localeCompare(b.Key))) {
+          const data = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: obj.Key }));
+          res.write(await data.Body.transformToString());
+        }
+        res.end();
+      } catch (e) { res.writeHead(500); res.end(e.message); }
+    }
+
+    http.createServer((req, res) => {
+      const parts = req.url.split('?')[0].split('/').filter(Boolean);
+      if (parts.length < 3) { res.writeHead(400); res.end('Bad request'); return; }
+      streamLogs(parts[0], parts[1], parts[2], res);
+    }).listen(3000, () => console.log('Log server on 3000'));
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tekton-log-server
+  namespace: tekton-pipelines
+  labels:
+    app: tekton-log-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tekton-log-server
+  template:
+    metadata:
+      labels:
+        app: tekton-log-server
+    spec:
+      serviceAccountName: tekton-log-server
+      containers:
+      - name: node
+        image: node:20-alpine
+        command: ["sh", "-c", "cd /tmp && npm install @aws-sdk/client-s3 && NODE_PATH=/tmp/node_modules node /app/server.js"]
+        ports:
+        - containerPort: 3000
+        env:
+        - name: S3_BUCKET
+          value: "${RESULTS_BUCKET}"
+        volumeMounts:
+        - name: config
+          mountPath: /app/
+      volumes:
+      - name: config
+        configMap:
+          name: log-server-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tekton-log-server
+  namespace: tekton-pipelines
+spec:
+  selector:
+    app: tekton-log-server
+  ports:
+  - port: 3000
+    targetPort: 3000
