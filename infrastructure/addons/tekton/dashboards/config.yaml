@@ -7,23 +7,23 @@ spec:
   chain:
     disabled: true
   pipeline:
-    default-timeout-minutes: 240
+    default-timeout-minutes: 480
     default-task-run-workspace-binding: "emptyDir: {}"
     default-pod-template:
       metadata:
         annotations:
           karpenter.sh/do-not-disrupt: "true"
-      affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - topologyKey: kubernetes.io/hostname
-            namespaceSelector:
-              matchExpressions:
-              - key: kubernetes.io/metadata.name
-                operator: In
-                values:
-                - flux-system
-                - tekton-pipelines
+      tolerations:
+      - key: workload
+        value: scalability
+        effect: NoSchedule
+      nodeSelector:
+        karpenter.sh/nodepool: scalability
+    options:
+      configMaps:
+        config-defaults:
+          data:
+            default-pod-gc-grace-period: "300s"
   dashboard:
     readonly: false
     options:

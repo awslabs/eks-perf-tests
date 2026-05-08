@@ -1,0 +1,28 @@
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: scalability
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      taints:
+      - key: workload
+        value: scalability
+        effect: NoSchedule
+      requirements:
+      - key: kubernetes.io/arch
+        operator: In
+        values: ["amd64"]
+      - key: karpenter.sh/capacity-type
+        operator: In
+        values: ["on-demand"]
+      - key: node.kubernetes.io/instance-type
+        operator: In
+        values: ["m5.xlarge", "m5.2xlarge", "m5.4xlarge", "r5.xlarge", "r5.2xlarge", "c5.xlarge", "c5.2xlarge"]
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 5m
