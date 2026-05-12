@@ -28,6 +28,7 @@ data:
 
     http.createServer((req, res) => {
       const parts = req.url.split('?')[0].split('/').filter(Boolean);
+      if (parts[0] === 'logs') parts.shift();
       if (parts.length < 3) { res.writeHead(400); res.end('Bad request'); return; }
       streamLogs(parts[0], parts[1], parts[2], res);
     }).listen(3000, () => console.log('Log server on 3000'));
@@ -48,8 +49,16 @@ spec:
     metadata:
       labels:
         app: tekton-log-server
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
       serviceAccountName: tekton-log-server
+      nodeSelector:
+        karpenter.sh/nodepool: management
+      tolerations:
+      - key: workload
+        value: management
+        effect: NoSchedule
       containers:
       - name: node
         image: node:20-alpine

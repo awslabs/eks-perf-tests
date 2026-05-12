@@ -238,7 +238,7 @@ spec:
     - name: max-nodes
       value: "1"
     - name: host-instance-types
-      value: "m5.12xlarge m5.16xlarge r5.12xlarge r5.16xlarge	c5.12xlarge c5.18xlarge"
+      value: "m5.16xlarge m5.24xlarge r5.16xlarge r5.24xlarge c5.18xlarge c5.24xlarge"
     - name: host-taints
       value: key=monitoring,value=true,effect=NO_SCHEDULE
     - name: nodegroup-prefix

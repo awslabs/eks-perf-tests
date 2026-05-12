@@ -18,17 +18,18 @@ data:
         Parser            cri
         Refresh_Interval  5
         Mem_Buf_Limit     50MB
+        Read_from_Head    On
+        DB                /tmp/fluentbit-pos.db
 
     [OUTPUT]
         Name                         s3
         Match                        *
         bucket                       ${RESULTS_BUCKET}
         region                       ${AWS_REGION}
-        role_arn                     ${TEKTON_EXECUTOR_ROLE_ARN}
         s3_key_format                /logs/$TAG[1]/$TAG[0]/$TAG[2]/%Y%m%d%H%M%S
         s3_key_format_tag_delimiters _
         total_file_size              1M
-        upload_timeout               30s
+        upload_timeout               5s
         store_dir                    /tmp/fluent-bit/s3
         use_put_object               On
         content_type                 text/plain

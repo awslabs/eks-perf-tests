@@ -1,0 +1,76 @@
+apiVersion: operator.tekton.dev/v1alpha1
+kind: TektonConfig
+metadata:
+  name: config
+spec:
+  profile: all
+  chain:
+    disabled: true
+  pipeline:
+    default-timeout-minutes: 240
+    coschedule: workspaces
+    default-task-run-workspace-binding: "emptyDir: {}"
+    # Pod template for test workloads -- scalability nodepool
+    default-pod-template: |
+      metadata:
+        annotations:
+          karpenter.sh/do-not-disrupt: "true"
+      tolerations:
+      - key: workload
+        value: scalability
+        effect: NoSchedule
+      nodeSelector:
+        karpenter.sh/nodepool: scalability
+    options:
+      configMaps:
+        config-defaults:
+          data:
+            default-pod-gc-grace-period: "300s"
+            default-affinity-assistant-pod-template: |
+              nodeSelector:
+                karpenter.sh/nodepool: scalability
+              tolerations:
+              - key: workload
+                value: scalability
+                effect: NoSchedule
+      # Pin the critical orchestrator to management nodepool
+      deployments:
+        tekton-pipelines-controller:
+          spec:
+            template:
+              metadata:
+                annotations:
+                  karpenter.sh/do-not-disrupt: "true"
+              spec:
+                nodeSelector:
+                  karpenter.sh/nodepool: management
+                tolerations:
+                - key: workload
+                  value: management
+                  effect: NoSchedule
+  dashboard:
+    readonly: false
+    options:
+      deployments:
+        tekton-dashboard:
+          spec:
+            template:
+              metadata:
+                annotations:
+                  karpenter.sh/do-not-disrupt: "true"
+              spec:
+                nodeSelector:
+                  karpenter.sh/nodepool: management
+                tolerations:
+                - key: workload
+                  value: management
+                  effect: NoSchedule
+                containers:
+                - name: tekton-dashboard
+                  args:
+                  - --external-logs=http://tekton-log-server.tekton-pipelines.svc.cluster.local:3000
+                  - --stream-logs=false
+  hub:
+    options: {}
+  result:
+    disabled: false

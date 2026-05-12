@@ -5,6 +5,6 @@ resources:
   - storage-class-gp2.yaml
   - bucket.yaml
   - operator-install.yaml
+  - config.yaml
   - dashboards.yaml
-  - log-server/
   - scalability-ns/
