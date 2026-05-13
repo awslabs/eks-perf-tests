@@ -178,6 +178,9 @@ spec:
   - name: send-slack-notification
     image: alpine/k8s:1.23.7
     script: |
-      if [ -n "$(params.slack-hook)" ]; then
-        curl -H "Content-type: application/json" --data '{"Message": "$(params.slack-message)"}' -X POST  $(params.slack-hook)
+      HOOK="$(params.slack-hook)"
+      if [ -n "$HOOK" ] && echo "$HOOK" | grep -q "^http"; then
+        curl -H "Content-type: application/json" --data '{"Message": "$(params.slack-message)"}' -X POST "$HOOK"
+      else
+        echo "No valid Slack webhook configured, skipping notification"
       fi

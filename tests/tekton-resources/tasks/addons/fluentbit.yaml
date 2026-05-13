@@ -48,6 +48,8 @@ spec:
       # Download and patch fluent-bit manifest to include monitoring toleration before applying
       curl -s https://raw.githubusercontent.com/aws-samples/amazon-cloudwatch-container-insights/latest/k8s-deployment-manifest-templates/deployment-mode/daemonset/container-insights-monitoring/fluent-bit/fluent-bit.yaml -o ./fluent-bit.yaml
       # Inject toleration so daemonset schedules on tainted monitoring nodes from the start
-      sed -i '/tolerations:/a\        - key: "monitoring"\n          operator: "Equal"\n          value: "true"\n          effect: "NoSchedule"' ./fluent-bit.yaml
+      sed -i '/tolerations:/a\        - key: "monitoring"\n          operator: "Equal"\n          value: "true"\n          effect: "NoSchedule"' ./fluent-bit.yaml 2>/dev/null || true
+      # Reduce CPU request from upstream 500m to 100m (fluent-bit is lightweight, avoids scheduling failures at 5k scale when coredns autoscaler packs c5.large nodes)
+      sed -i 's/cpu: 500m/cpu: 100m/' ./fluent-bit.yaml 2>/dev/null || true
       kubectl apply -f ./fluent-bit.yaml
-      kubectl rollout status daemonset fluent-bit -n amazon-cloudwatch --timeout 10m
+      kubectl rollout status daemonset fluent-bit -n amazon-cloudwatch --timeout 45m

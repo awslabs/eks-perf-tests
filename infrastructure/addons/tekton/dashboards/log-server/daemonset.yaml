@@ -15,6 +15,13 @@ spec:
         app: tekton-log-collector
     spec:
       serviceAccountName: tekton-log-server
+      tolerations:
+      - key: workload
+        value: scalability
+        effect: NoSchedule
+      - key: workload
+        value: management
+        effect: NoSchedule
       containers:
       - name: fluent-bit
         image: public.ecr.aws/aws-observability/aws-for-fluent-bit:2.32.0

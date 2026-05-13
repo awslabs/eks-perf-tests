@@ -14,8 +14,16 @@ spec:
     metadata:
       labels:
         app: perfdash
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
       serviceAccountName: perfdash
+      nodeSelector:
+        karpenter.sh/nodepool: management
+      tolerations:
+      - key: workload
+        value: management
+        effect: NoSchedule
       containers:
         - name: perfdash
           image: gcr.io/k8s-staging-perf-tests/perfdash:2.56

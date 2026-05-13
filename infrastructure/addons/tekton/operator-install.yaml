@@ -12,6 +12,28 @@ spec:
   prune: true
   wait: true
   timeout: 10m
+  # Pin tekton-operator + webhook Deployments to management nodepool
+  patches:
+    - target:
+        kind: Deployment
+        namespace: tekton-operator
+      patch: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: unused
+        spec:
+          template:
+            metadata:
+              annotations:
+                karpenter.sh/do-not-disrupt: "true"
+            spec:
+              nodeSelector:
+                karpenter.sh/nodepool: management
+              tolerations:
+              - key: workload
+                value: management
+                effect: NoSchedule
   healthChecks:
     - apiVersion: apps/v1
       kind: Deployment

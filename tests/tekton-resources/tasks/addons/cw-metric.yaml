@@ -24,6 +24,9 @@ spec:
     - name: run-id
       description: "Pipeline runId required for populating runId dimension to be queried for dashboards later"
       default: ""
+    - name: manifest-id
+      description: "Manifest Id for metric dimension used as identifier for dashboards later"
+      default: ""
   steps:
   - name: cw-emit
     image: amazon/aws-cli
@@ -32,4 +35,6 @@ spec:
       aws cloudwatch --region $(params.region) put-metric-data --metric-name $(params.metric-name) --namespace $(params.namespace) --dimensions Nodes=$(params.dimensions) --unit $(params.unit) --value $(params.value) 
       if [ -n "$(params.run-id)" ]; then
         aws cloudwatch --region $(params.region) put-metric-data --metric-name $(params.metric-name) --namespace $(params.namespace) --dimensions Nodes=$(params.dimensions),RunId=$(params.run-id) --value $(params.value)
+      elif [ -n "$(params.manifest-id)" ]; then
+        aws cloudwatch --region $(params.region) put-metric-data --metric-name $(params.metric-name) --namespace $(params.namespace) --dimensions Nodes=$(params.dimensions),ManifestId=$(params.manifest-id) --value $(params.value)
       fi
