@@ -1,0 +1,201 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: kit-cl2-load
+  namespace: tekton-pipelines
+spec:
+  workspaces:
+    - name: source
+    - name: results
+    - name: config
+  params:
+    - name: name
+      description: The name of the test cluster.
+      default: "guest"
+    - name: amp-workspace-id
+      description: The AMP workspace ID where remote write needs to happen.
+    - name: node_count
+      description: desired node count for Dataplane, min is 1000 to create DP nodes.
+    - name: kubernetes-version
+      default: "1.24"
+      description: Kubernetes version for the guest cluster.
+    - name: apiserver-replicas
+      description: "Desired replicas of the APIServer"
+      default: "2"
+    - name: apiserver-image
+      default: ""
+      description: Image of apiserver
+    - name: apiserver-parameters
+      default: ""
+      description: |
+        Parameters of the apiserver. e.g. '["--goaway-chance=0.01"]'
+    - name: apiserver-instance-type
+      default: "m5.2xlarge"
+      description: Instance type for the apiserver
+    - name: etcd-replicas
+      default: "3"
+      description: Number of ETCD replicas
+    - name: etcd-image
+      default: ""
+      description: Image of ETCD
+    - name: etcd-parameters
+      default: ""
+      description: Parameters of the ETCD container
+    - name: etcd-instance-type
+      default: "m5.xlarge"
+      description: Instance type for the ETCD
+    - name: aws-vpc-cni-version
+      default: release-1.10
+      description: The release version for aws vpc cni.
+    - name: aws-ebs-csi-driver-version
+      default: release-1.13
+      description: The release version for aws ebs csi driver.
+    - name: monitoring-node-instance-types
+      default: |
+        ["m5.4xlarge"]
+      description: The desired instance type of the monitoring node.
+    - name: monitoring-node-selectors
+      default: 'node.kubernetes.io/instance-type=m5.4xlarge'
+      description: The selectors to select the monitoring node for tainting.
+    - name: giturl
+      description: "git url to clone the package"
+      default: https://github.com/kubernetes/perf-tests.git
+    - name: cl2-branch
+      description: "The branch of clusterloader2 you want to use"
+      default: "master"
+    - name: pods-per-node
+      description: "pod density"
+      default: "10"
+    - name: nodes-per-namespace
+      description:  "nodes per namespace to get created for load test "
+      default: "100"
+    - name: cl2-load-test-throughput
+      description: "throughput used for mutate operations"
+      default: "15"
+    - name: results-bucket
+      description: "Results bucket with path of s3 to upload results"
+  tasks:
+    - name: setup-control-plane
+      taskRef:
+        kind: Task
+        name: control-plane-setup
+      params:
+        - name: cluster-name
+          value: '$(params.name)'
+        - name: kubernetes-version
+          value: '$(params.kubernetes-version)'
+        - name: apiserver-replicas
+          value: '$(params.apiserver-replicas)'
+        - name: apiserver-image
+          value: '$(params.apiserver-image)'
+        - name: apiserver-parameters
+          value: '$(params.apiserver-parameters)'
+        - name: apiserver-instance-type
+          value: '$(params.apiserver-instance-type)'
+        - name: etcd-replicas
+          value: '$(params.etcd-replicas)'
+        - name: etcd-image
+          value: '$(params.etcd-image)'
+        - name: etcd-parameters
+          value: '$(params.etcd-parameters)'
+        - name: etcd-instance-type
+          value: '$(params.etcd-instance-type)'
+
+    - name: setup-monitoring-node
+      runAfter: [setup-control-plane]
+      taskRef:
+        kind: Task
+        name: data-plane-setup
+      params:
+        - name: cluster-name
+          value: '$(params.name)'
+        - name: dataplane-name
+          value: 'monitoring-$(params.name)'
+        - name: desired-nodes
+          value: '1'
+        - name: instance-types
+          value: '$(params.monitoring-node-instance-types)'
+
+    - name: label-and-taint-minitoring-node
+      runAfter: [setup-monitoring-node]
+      taskRef:
+        kind: Task
+        name: label-and-taint-node
+      params:
+        - name: cluster-name
+          value: '$(params.name)'
+        - name: selectors
+          value: '$(params.monitoring-node-selectors)'
+        - name: taint
+          value: 'monitoring=true:NoSchedule'
+        # We add another label to ensure Prometheus stack only run on the dedicated node in
+        # https://github.com/awslabs/kubernetes-iteration-toolkit/blob/e95b99e09e89f23a4aa8162632ba78b6c351dec5/tests/tasks/generators/clusterloader/load.yaml#L84
+        - name: labels
+          value: 'eks.amazonaws.com/nodegroup=monitoring-$(params.name)-nodes-1'
+      workspaces:
+        - name: config
+          workspace: config
+
+    - name: setup-data-plane
+      runAfter: [label-and-taint-minitoring-node]
+      taskRef:
+        kind: Task
+        name: data-plane-setup
+      params:
+        - name: cluster-name
+          value: '$(params.name)'
+        - name: desired-nodes
+          value: '$(params.node_count)'
+
+    - name: validate-data-plane
+      runAfter: [setup-data-plane]
+      taskRef:
+        kind: Task
+        name: validate-data-plane
+      params:
+        - name: desired-nodes
+          value: '$(($(params.node_count)+1))'
+      workspaces:
+        - name: config
+          workspace: config
+
+    - name: load
+      runAfter: [validate-data-plane]
+      taskRef:
+        kind: Task
+        name: load
+      params:
+        - name: cluster-name
+          value: '$(params.name)'
+        - name: cl2-branch
+          value: '$(params.cl2-branch)'
+        - name: giturl
+          value: '$(params.giturl)'
+        - name: pods-per-node
+          value: '$(params.pods-per-node)'
+        - name: nodes-per-namespace
+          value: '$(params.nodes-per-namespace)'
+        - name: cl2-load-test-throughput
+          value: '$(params.cl2-load-test-throughput)'
+        - name: results-bucket
+          value: '$(params.results-bucket)'
+        - name: nodes
+          value: '$(params.node_count)'
+        - name: amp-workspace-id
+          value: '$(params.amp-workspace-id)'
+      workspaces:
+        - name: source
+          workspace: source
+        - name: results
+          workspace: results
+        - name: config
+          workspace: config
+
+  # finally:
+  # - name: teardown
+  #   taskRef:
+  #     name: teardown
+  #   params:
+  #     - name: name
+  #       value: '$(params.name)'

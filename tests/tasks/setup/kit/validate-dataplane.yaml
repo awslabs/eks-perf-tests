@@ -1,0 +1,38 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: validate-data-plane
+  namespace: tekton-pipelines
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.17.0"
+    tekton.dev/categories: Kubernetes
+    tekton.dev/tags: CLI, kubectl
+    tekton.dev/displayName: "kubernetes actions"
+    tekton.dev/platforms: "linux/amd64"
+spec:
+  description: |
+    Wait and validate the data plane in a guest cluster.
+  params:
+  - name: desired-nodes
+    description: The desired number of nodes in the cluster.
+  workspaces:
+  - name: config
+    mountPath: /config/
+  stepTemplate:
+    env:
+    - name: KUBECONFIG
+      value: /config/kubeconfig
+  steps:
+  - name: setup-data-plane
+    image: bitnami/kubectl:1.24.5
+    script: |
+      #!/bin/bash
+      set -e
+      echo "validating data plane nodes"
+      while true; do
+        ready_node=$(kubectl get nodes --no-headers | grep -w Ready | wc -l)
+        echo "ready-nodes=$ready_node out of $(params.desired-nodes)"
+        if [[ "$ready_node" -eq $(params.desired-nodes) ]]; then break; fi
+        sleep 5
+      done

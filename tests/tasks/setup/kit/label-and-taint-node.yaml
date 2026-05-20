@@ -1,0 +1,54 @@
+# taint by label node.kubernetes.io/instance-type: t3a.xlarge
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: label-and-taint-node
+  namespace: tekton-pipelines
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.17.0"
+    tekton.dev/categories: Kubernetes
+    tekton.dev/tags: CLI, kubectl
+    tekton.dev/displayName: "kubernetes actions"
+    tekton.dev/platforms: "linux/amd64"
+spec:
+  description: |
+    Taint a node object.
+  params:
+  - name: cluster-name
+    default: "guest"
+    description: name of the guest cluster.
+  - name: selectors
+    default: ""
+    description: selectors to fetch the k8s nodes. e.g. key1=value1,key2=value2
+  - name: taint
+    default: "monitoring=true:NoSchedule"
+    description: Taint to apply to the k8s node.
+  - name: labels
+    default: ""
+    description: labels to add to the k8s nodes. e.g. key1=value1,key2=value2
+  workspaces:
+  - name: config
+    mountPath: /config/
+  stepTemplate:
+    env:
+    - name: KUBECONFIG
+      value: /config/kubeconfig
+  steps:
+  - name: kubectl-taint
+    image: bitnami/kubectl:1.24.5
+    script: |
+      echo "finding node(s) to add taint"
+        while true; do
+        nodes=$(kubectl get -l $(params.selectors) -o jsonpath='{.metadata.name}')
+        if [[ ! -z "$nodes"]]; then
+          echo "found node(s)"
+          break
+        fi
+      done
+      if [ ! -z $(params.taint) ]; then
+        kubectl taint nodes --overwrite -l $(params.selectors) $(params.taint)
+      fi
+      if [ ! -z $(params.labels) ]; then
+        kubectl label nodes --overwrite -l $(params.selectors) $(params.labels)
+      fi
