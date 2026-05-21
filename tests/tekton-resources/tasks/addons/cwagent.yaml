@@ -22,7 +22,7 @@ spec:
       value: /config/kubeconfig
   steps:
   - name: create-cw-agent
-    image: alpine/k8s:1.23.7
+    image: alpine/k8s:1.31.13
     script: |
 
       #kubectl commands are purely for knowing state of cluster before kicking off the test.
