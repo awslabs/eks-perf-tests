@@ -1,0 +1,12 @@
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerBinding
+metadata:
+  name: aws-account-cleanup
+  namespace: tekton-pipelines
+spec: 
+  params: 
+    - name: aws-nuke-s3-config-path
+      value: <Replace this with s3 path of config>
+    - name: aws-account-alias
+      value: <Replace this with account alias>

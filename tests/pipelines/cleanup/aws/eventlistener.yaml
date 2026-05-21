@@ -1,0 +1,14 @@
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: EventListener
+metadata:
+  name: aws-account-cleanup
+  namespace: tekton-pipelines
+spec:
+  serviceAccountName: tekton-triggers
+  triggers:
+    - name: cron
+      bindings:
+      - ref: aws-account-cleanup
+      template:
+        ref: aws-account-cleanup
