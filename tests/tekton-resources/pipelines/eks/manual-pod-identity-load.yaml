@@ -1,0 +1,206 @@
+# this pipeline makes the assumption that the cluster is created & the monitoring-$(params.cluster-name)-nodes-1 node group is created, self managed nodes are created
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: manual-cl2loadtest-pod-identity
+  namespace: scalability
+spec:
+  finally:
+  - name: teardown-pod-identity
+    params:
+    - name: cluster-name
+      value: $(params.cluster-name)
+    - name: endpoint
+      value: $(params.endpoint)
+    - name: slack-hook
+      value: $(params.slack-hook)
+    - name: slack-message
+      value: $(params.slack-message) job completed
+    - name: service-role-stack-name
+      value: $(params.cluster-name)-service-role
+    - name: node-role-stack-name
+      value: $(params.cluster-name)-node-role
+    - name: launch-template-stack-name
+      value: $(params.cluster-name)-launch-template
+    - name: namespace-count
+      value: $(params.namespace-count)
+    retries: 10
+    taskRef:
+      kind: Task
+      name: awscli-eks-cluster-teardown-pod-identity
+  params:
+  - name: cluster-name
+    type: string
+  - name: endpoint
+    type: string
+  - name: desired-nodes
+    type: string
+  - name: pods-per-node
+    type: string
+  - name: nodes-per-namespace
+    type: string
+  - name: cl2-load-test-throughput
+    type: string
+  - name: results-bucket
+    type: string
+  - default: "<Replace with Slack hook arn>"
+    name: slack-hook
+    type: string
+  - name: slack-message
+    type: string
+  - name: amp-workspace-id
+    type: string
+  - name: vpc-cfn-url
+    default: "https://raw.githubusercontent.com/awslabs/kubernetes-iteration-toolkit/main/tests/assets/amazon-eks-vpc.json"
+    type: string
+  - name: ng-cfn-url
+    default: "https://raw.githubusercontent.com/awslabs/kubernetes-iteration-toolkit/main/tests/assets/eks_node_group_launch_template.json"
+    type: string
+  - name: kubernetes-version
+    type: string
+  - default: https://raw.githubusercontent.com/awslabs/kubernetes-iteration-toolkit/main/tests/assets/eks_service_role.json
+    name: service-role-cfn-url
+    type: string
+  - default: https://raw.githubusercontent.com/awslabs/kubernetes-iteration-toolkit/main/tests/assets/eks_node_role.json
+    name: node-role-cfn-url
+    type: string
+  - name: namespace-prefix
+    default: "default"
+    description: "The prefix of namespaces for EKS Pod Identity test."
+  - name: namespace-count
+    default: "1"
+    description: "The number of namespaces for EKS Pod Identity test."
+  - name: pia-trust-policy-url
+    default: "https://raw.githubusercontent.com/awslabs/kubernetes-iteration-toolkit/main/tests/assets/eks-pod-identity/pia-trust-policy.json"
+    type: string
+  - name: pia-test-config-url
+    default: "https://raw.githubusercontent.com/awslabs/kubernetes-iteration-toolkit/main/tests/assets/eks-pod-identity/config.yaml"
+  - name: pia-test-pod-spec-url
+    default: "https://raw.githubusercontent.com/awslabs/kubernetes-iteration-toolkit/main/tests/assets/eks-pod-identity/pod-default.yaml"
+  - name: cl2-eks-pod-identity-pods
+    default: "5000"
+  - name: cl2-default-qps
+    default: "100"
+  - name: cl2-default-burst
+    default: "200"
+  - name: cl2-uniform-qps
+    default: "100"
+  - name: cl2-metric-dimension-name
+    description: "default metric dimension name"
+    default: "ClusterName"
+  - name: cl2-metric-namespace
+    description: "default metric namespace for pod identity"
+    default: "EKSPodIdentityScalabilityTests"
+  - name: cl2-metric-latency-name
+    description: "default metric latency name for pod identity"
+    default: "CredentialFetchLatency"
+  - name: cl2-metric-period
+    description: "default metric period"
+    default: "300"
+  - name: timeout-pia-pod-creation
+    default: "80s"
+  - name: timeout-pia-pod-startup
+    default: "60s"
+  - name: launch-template-ami
+    default: ""
+    description: "Launch template ImageId value, which may be an AMI ID or resolve:ssm reference. By default resolve to the lates AL2023 ami for cluster version"
+    type: string
+  tasks:
+  - name: slack-notification
+    params:
+    - name: slack-hook
+      value: $(params.slack-hook)
+    - name: slack-message
+      value: $(params.slack-message) job kicked off
+    taskRef:
+      kind: Task
+      name: slack-notification
+  - name: create-pod-identity-association
+    params:
+    - name: cluster-name
+      value: $(params.cluster-name)
+    - name: endpoint
+      value: $(params.endpoint)
+    - name: namespace-prefix
+      value: $(params.namespace-prefix)
+    - name: namespace-count
+      value: $(params.namespace-count)
+    - name: pia-trust-policy-url
+      value: $(params.pia-trust-policy-url)
+    runAfter:
+    - slack-notification
+    taskRef:
+      kind: Task
+      name:  awscli-eks-pia-create
+    workspaces:
+    - name: config
+      workspace: config
+  - name: generate-eks-pod-identity
+    params:
+    - name: cl2-eks-pod-identity-pods
+      value: $(params.cl2-eks-pod-identity-pods)
+    - name: cl2-default-qps
+      value: $(params.cl2-default-qps)
+    - name: cl2-default-burst
+      value: $(params.cl2-default-burst)
+    - name: cl2-uniform-qps
+      value: $(params.cl2-uniform-qps)
+    - name: cl2-metric-dimension-name
+      value: $(params.cl2-metric-dimension-name)
+    - name: cl2-metric-namespace
+      value: $(params.cl2-metric-namespace)
+    - name: cl2-metric-latency-name
+      value: $(params.cl2-metric-latency-name)
+    - name: cl2-metric-period
+      value: $(params.cl2-metric-period)
+    - name: results-bucket
+      value: $(params.results-bucket)
+    - name: nodes
+      value: $(params.desired-nodes)
+    - name: cluster-name
+      value: $(params.cluster-name)
+    - name: endpoint
+      value: $(params.endpoint)
+    - name: namespace-prefix
+      value: $(params.namespace-prefix)
+    - name: namespace-count
+      value: $(params.namespace-count)
+    - name: pia-test-config-url
+      value: $(params.pia-test-config-url)
+    - name: pia-test-pod-spec-url
+      value: $(params.pia-test-pod-spec-url)
+    - name: timeout-pia-pod-creation
+      value: $(params.timeout-pia-pod-creation)
+    - name: timeout-pia-pod-startup
+      value: $(params.timeout-pia-pod-startup)
+    - name: amp-workspace-id
+      value: '$(params.amp-workspace-id)'
+    runAfter:
+    - create-pod-identity-association
+    taskRef:
+      kind: Task
+      name: load-pod-identity
+    workspaces:
+    - name: source
+      workspace: source
+    - name: results
+      workspace: results
+    - name: config
+      workspace: config
+  - name: cw-metrics-eks-pod-identity
+    params:
+    - name: dimensions
+      value: $(params.desired-nodes)
+    - name: value
+      value: $(tasks.generate-eks-pod-identity.results.datapoint)
+    - name: namespace
+      value: eks-pod-identity-$(params.kubernetes-version)
+    runAfter:
+    - generate-eks-pod-identity
+    taskRef:
+      kind: Task
+      name: cloudwatch
+  workspaces:
+  - name: source
+  - name: results
+  - name: config
