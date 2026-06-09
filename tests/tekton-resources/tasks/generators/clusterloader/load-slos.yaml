@@ -61,7 +61,7 @@ spec:
       git checkout $(params.cl2-branch)
       git branch
   - name: prepare-loadtest
-    image: golang:1.25
+    image: golang:1.26
     workingDir: $(workspaces.source.path)
     script: |
       S3_RESULT_PATH=$(params.results-bucket)
