@@ -70,6 +70,12 @@ spec:
                   args:
                   - --external-logs=http://tekton-log-server.tekton-pipelines.svc.cluster.local:3000
                   - --stream-logs=false
+  pruner:
+    disabled: false
+    keep: 1000
+    resources:
+    - pipelinerun
+    schedule: "0 8 * * *"
   hub:
     options: {}
   result:
