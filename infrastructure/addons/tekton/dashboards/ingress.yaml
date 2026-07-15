@@ -8,6 +8,7 @@ metadata:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
     alb.ingress.kubernetes.io/certificate-arn: "${CERT_ARN}"
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09
     alb.ingress.kubernetes.io/auth-type: oidc
     alb.ingress.kubernetes.io/auth-idp-oidc: '{"issuer":"${FEDERATE_OIDC_ISSUER}","authorizationEndpoint":"${FEDERATE_OIDC_AUTH_ENDPOINT}","tokenEndpoint":"${FEDERATE_OIDC_TOKEN_ENDPOINT}","userInfoEndpoint":"${FEDERATE_OIDC_USERINFO_ENDPOINT}","secretName":"federate-oidc-secret"}'
     alb.ingress.kubernetes.io/auth-on-unauthenticated-request: authenticate
