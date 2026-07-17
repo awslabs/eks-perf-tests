@@ -8,4 +8,44 @@ data:
   AWS_REGION: us-west-2
   PERFDASH_LOG_BUCKET: "${RESULTS_BUCKET}"
   jobs.yaml: |
-    periodicJobs: []
+    periodics:
+      - name: "kit-eks-5k/vba"
+        tags:
+          - "perfDashPrefix: 5K test-vba"
+          - "perfDashJobType: performance"
+          - "perfDashArtifactsDir: "
+      - name: "kit-eks-5k/slos/1-33"
+        tags:
+          - "perfDashPrefix: 5K test-slos-133"
+          - "perfDashJobType: performance"
+          - "perfDashArtifactsDir: "
+      - name: "kit-eks-5k/slos/1-34"
+        tags:
+          - "perfDashPrefix: 5K test-slos-134"
+          - "perfDashJobType: performance"
+          - "perfDashArtifactsDir: "
+      - name: "kit-eks-5k/slos/1-35"
+        tags:
+          - "perfDashPrefix: 5K test-slos-135"
+          - "perfDashJobType: performance"
+          - "perfDashArtifactsDir: "
+      - name: "kit-eks-5k/slos/1-36"
+        tags:
+          - "perfDashPrefix: 5K test-slos-136"
+          - "perfDashJobType: performance"
+          - "perfDashArtifactsDir: "
+      - name: "kit-eks-1k/xl/1-34"
+        tags:
+          - "perfDashPrefix: 1K test-pcp-xl-throughput-134"
+          - "perfDashJobType: performance"
+          - "perfDashArtifactsDir: "
+      - name: "kit-eks-1k/2xl/1-34"
+        tags:
+          - "perfDashPrefix: 1K test-pcp-2xl-throughput-134"
+          - "perfDashJobType: performance"
+          - "perfDashArtifactsDir: "
+      - name: "kit-eks-1k/4xl/1-34"
+        tags:
+          - "perfDashPrefix: 1K test-pcp-4xl-throughput-134"
+          - "perfDashJobType: performance"
+          - "perfDashArtifactsDir: "

@@ -26,7 +26,7 @@ spec:
         effect: NoSchedule
       containers:
         - name: perfdash
-          image: gcr.io/k8s-staging-perf-tests/perfdash:2.56
+          image: gcr.io/k8s-staging-perf-tests/perfdash:2.55
           command:
             - /perfdash
             - --www=true
