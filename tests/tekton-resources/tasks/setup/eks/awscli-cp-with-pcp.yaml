@@ -61,6 +61,11 @@ spec:
         aws eks create-cluster --name $(params.cluster-name) --region $(params.region) --kubernetes-version $(params.kubernetes-version) --role-arn $SERVICE_ROLE_ARN --resources-vpc-config subnetIds=$subnets,securityGroupIds=$sg --control-plane-scaling-config tier=$(params.control-plane-tier) $ENDPOINT_FLAG
       fi
       aws eks $ENDPOINT_FLAG --region $(params.region) wait cluster-active --name $(params.cluster-name)
+      # Cluster is ACTIVE (create succeeded). Wait for the API server endpoint to
+      # become resolvable/discoverable before connecting with kubectl: the endpoint
+      # instances take time to come up and the Route53 record has a ~60s TTL, so
+      # connecting immediately can fail with "no such host".
+      sleep 120
   - name: write-kubeconfig
     image: alpine/k8s:1.35.0
     script: |
