@@ -61,11 +61,6 @@ spec:
         aws eks create-cluster --name $(params.cluster-name) --region $(params.region) --kubernetes-version $(params.kubernetes-version) --role-arn $SERVICE_ROLE_ARN --resources-vpc-config subnetIds=$subnets,securityGroupIds=$sg --control-plane-scaling-config tier=$(params.control-plane-tier) $ENDPOINT_FLAG
       fi
       aws eks $ENDPOINT_FLAG --region $(params.region) wait cluster-active --name $(params.cluster-name)
-      # Cluster is ACTIVE (create succeeded). Wait for the API server endpoint to
-      # become resolvable/discoverable before connecting with kubectl: the endpoint
-      # instances take time to come up and the Route53 record has a ~60s TTL, so
-      # connecting immediately can fail with "no such host".
-      sleep 120
   - name: write-kubeconfig
     image: alpine/k8s:1.35.0
     script: |
@@ -74,6 +69,26 @@ spec:
         ENDPOINT_FLAG="--endpoint $(params.endpoint)"
       fi
       aws eks $ENDPOINT_FLAG update-kubeconfig --name $(params.cluster-name) --region $(params.region)
+
+      # The cluster is ACTIVE, but the API server endpoint may not be resolvable yet:
+      # the endpoint instances take time to come up and the Route53 record has a ~60s
+      # TTL, so connecting immediately can fail with "no such host". Poll the endpoint
+      # with a lightweight kubectl call, breaking as soon as it responds, and cap the
+      # wait at 120s (Route53 record TTL/SLO).
+      DEADLINE=$(( $(date +%s) + 120 ))
+      # kubectl get --raw='/readyz' exercises DNS + TCP + TLS + apiserver in one call,
+      # so it fails until the endpoint is fully reachable (including the "no such host" DNS error).
+      until kubectl get --raw='/readyz' >/dev/null 2>&1; do
+        if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+          echo "ERROR: API server endpoint not reachable within 120s of cluster becoming ACTIVE"
+          exit 1
+        fi
+        echo "$(date) API server endpoint not reachable yet; retrying in 5s..."
+        sleep 5
+      done
+
+      echo "API server endpoint reachable; verifying connectivity with a dummy kubectl call:"
+      kubectl get --raw='/readyz'
   - name: install-addons-and-validate
     image: alpine/k8s:1.35.0
     script: |
