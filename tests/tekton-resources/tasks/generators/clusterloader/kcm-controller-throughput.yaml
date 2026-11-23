@@ -1,0 +1,164 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: kcm-controller-throughput
+  namespace: scalability
+spec:
+  description: "clusterloader2 task to run various types of cl2 tests on a given cluster."
+  params:
+  - name: giturl
+    description: "git url to clone the package"
+    default: https://github.com/kubernetes/perf-tests.git
+  - name: kiturl
+    description: "git url to clone for kit assets"
+    default: https://github.com/awslabs/kubernetes-iteration-toolkit
+  - name: controller
+    description: "KCM controller to load: runs tests/assets/kcm-controller-throughput/<controller>/config.yaml; the cl2-* defaults are the replicaset load"
+  - name: cl2-namespaces
+    description: "number of namespaces holding the test objects"
+    default: "50"
+  - name: cl2-objects-per-namespace
+    description: "number of test objects (ReplicaSets for replicaset) per namespace"
+    default: "100"
+  - name: cl2-waves
+    description: "number of waves; each wave scales every test object up and back"
+    default: "10"
+  - name: cl2-load-qps
+    description: "test object patches per second inside a wave, at most 1000 with the 20 CL2 clients"
+    default: "1000"
+  - name: cl2-throughput-threshold
+    description: "controller throughput threshold, object changes per second that every half-wave must reach"
+    default: "119"
+  - name: nodes
+    description: "number of dataplane nodes to run the load test against"
+    default: "1000"
+  - name: results-bucket
+    description: "Results bucket with path of s3 to upload results"
+  - name: region
+    default: "us-west-2"
+    description: The region where the cluster is in.
+  - name: cluster-name
+    description: The name of the EKS cluster you want to spin.
+  - name: control-plane-tier
+    default: "standard"
+  - name: iterations
+    default: 3
+    description: "number of iterations to run the throughput test for different tiers"
+  results:
+    - name: datapoint
+      description: Stores the CL2 result that can be consumed by other tasks (e.g. cloudwatch)
+    - name: s3_result
+      description: Stores the S3 result path after compute
+  workspaces:
+  - name: source
+    mountPath: /src/k8s.io/
+  - name: results
+  - name: config
+    mountPath: /config/
+  stepTemplate:
+    env:
+    - name: KUBECONFIG
+      value: /config/kubeconfig
+  steps:
+  - name: git-clone
+    image: alpine/git
+    workingDir: $(workspaces.source.path)
+    script: |
+      git clone $(params.kiturl)
+
+      git clone $(params.giturl)
+      cd $(workspaces.source.path)/perf-tests/
+      git fetch origin --verbose --tags
+      git branch
+  - name: prepare-loadtest
+    image: golang:1.26
+    workingDir: $(workspaces.source.path)
+    script: |
+      S3_RESULT_PATH=$(params.results-bucket)/$(params.controller)
+      echo $S3_RESULT_PATH > $(results.s3_result.path)
+      echo "S3 Path: $S3_RESULT_PATH"
+      cat > "$(workspaces.source.path)/overrides.yaml" <<EOL
+      CL2_NAMESPACES: $(params.cl2-namespaces)
+      CL2_OBJECTS_PER_NAMESPACE: $(params.cl2-objects-per-namespace)
+      CL2_WAVES: $(params.cl2-waves)
+      CL2_LOAD_QPS: $(params.cl2-load-qps)
+      CL2_THROUGHPUT_THRESHOLD: $(params.cl2-throughput-threshold)
+      EOL
+
+      cat $(workspaces.source.path)/overrides.yaml
+      cp $(workspaces.source.path)/overrides.yaml $(workspaces.results.path)/overrides.yaml
+
+      # Building clusterloader2 binary
+      cd $(workspaces.source.path)/perf-tests/clusterloader2/
+      GOOS=linux CGO_ENABLED=0  go build -v -o ./clusterloader ./cmd
+  - name: run-loadtest
+    image: alpine/k8s:1.30.2
+    onError: continue
+    script: |
+      #!/bin/bash
+
+      TIER=$(params.control-plane-tier)
+      ITERATIONS=$(params.iterations)
+
+      cat $(workspaces.source.path)/kubernetes-iteration-toolkit/tests/assets/kcm-controller-throughput/$(params.controller)/config.yaml
+      cd $(workspaces.source.path)/perf-tests/clusterloader2/
+
+      FAIL_COUNT=0
+      for ((i=1; i<=ITERATIONS; i++)); do
+        echo "--- Starting iteration $i of $ITERATIONS ---"
+
+        # 20 clients (100 QPS each): every patch is a GET plus a PATCH, so cl2-load-qps 1000 needs 2000 client QPS.
+        ENABLE_EXEC_SERVICE=false ./clusterloader --kubeconfig=$KUBECONFIG --testconfig=$(workspaces.source.path)/kubernetes-iteration-toolkit/tests/assets/kcm-controller-throughput/$(params.controller)/config.yaml --testoverrides=$(workspaces.source.path)/overrides.yaml --nodes=$(params.nodes) --k8s-clients-number=20 --provider=eks --report-dir=$(workspaces.results.path)/${i} --alsologtostderr --v=2
+
+        if [ $? -ne 0 ]; then
+          echo "Iteration $i failed."
+          ((FAIL_COUNT++))
+        else
+          echo "Iteration $i passed."
+        fi
+      done
+
+      FAILURE_RATE=$(( (FAIL_COUNT * 100) / ITERATIONS ))
+
+      echo "------------------------------------------"
+      echo "Total Iterations: $ITERATIONS"
+      echo "Total Failures:   $FAIL_COUNT"
+      echo "Failure Rate:     $FAILURE_RATE%"
+      echo "------------------------------------------"
+
+      exit_code=0
+      if [ "$FAILURE_RATE" -gt 0 ]; then
+        echo "Error: Failure rate ($FAILURE_RATE%) exceeded the 0% threshold."
+        exit_code=1
+      else
+        echo "Success: Failure rate ($FAILURE_RATE%) is within acceptable limits."
+        exit_code=0
+      fi
+
+      if [ $exit_code -eq 0 ]; then
+        echo "0" | tee $(results.datapoint.path)
+      else
+        echo "1" | tee $(results.datapoint.path)
+      fi
+
+      exit $exit_code
+    timeout: 6h
+  - name: upload-results
+    image: amazon/aws-cli
+    workingDir: $(workspaces.results.path)
+    script: |
+      S3_RESULT_PATH=$(cat $(results.s3_result.path))
+      TIMESTAMP=$(basename "$S3_RESULT_PATH")
+      S3_BASE=$(dirname "$S3_RESULT_PATH")
+
+      echo "S3 Path: $S3_RESULT_PATH"
+      aws sts get-caller-identity
+      ls -larth
+
+      # Upload each iteration folder as <timestamp>-<i>/artifacts/
+      for ((i=1; i<=$(params.iterations); i++)); do
+        if [ -d "$i" ]; then
+          aws s3 cp "$i" "s3://${S3_BASE}/${TIMESTAMP}${i}/" --recursive
+        fi
+      done

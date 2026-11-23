@@ -1,0 +1,127 @@
+{{$namespaces := DefaultParam .CL2_NAMESPACES 50}}
+{{$svcPerNamespace := DefaultParam .CL2_OBJECTS_PER_NAMESPACE 100}}
+{{$setupQps := DefaultParam .CL2_SETUP_QPS 100}}
+{{$waves := DefaultParam .CL2_WAVES 10}}
+{{$settle := DefaultParam .CL2_SETTLE "5m"}}
+{{$setupTimeout := DefaultParam .CL2_SETUP_TIMEOUT "20m"}}
+{{$waveTimeoutSeconds := DefaultParam .CL2_WAVE_TIMEOUT_SECONDS 300}}
+# The setup slices get 30 minutes.
+{{$setupEndpointsTimeoutSeconds := DefaultParam .CL2_SETUP_ENDPOINTS_TIMEOUT_SECONDS 1800}}
+
+{{$ENDPOINTSLICE_THROUGHPUT_THRESHOLD := DefaultParam .CL2_THROUGHPUT_THRESHOLD 1}}
+
+# Each Service selects 3 bare pods (pa, pb, pc; label svc=<Service>, active=true) on the KWOK nodes. Each half-wave
+# sets active=false on every "pc" pod (down: each Service loses one endpoint) or back to true (up: gains it again)
+# with kubectl label, 25 namespaces at a time (ep-flip.sh), then waits until every Service's EndpointSlice lists 2 or 3
+# ready endpoints (ep-wait.py: one list, then a watch). No pod is created or scheduled during the waves.
+# Gate: timed from the start of the label step (ep-flip.sh writes the start time), as a ReplicaSet half-wave is in
+# effect timed from the start of its Scale step. ep-wait.py fails a half-wave that takes more than
+# totalServices/threshold seconds, and keeps waiting up to waveTimeoutSeconds; a
+# half-wave still not reconciled by then also fails, and the next one starts on top of it. Threshold 1 leaves only that
+# ceiling (record only). The setup pod wait is fatal.
+# The Exec steps run from CL2's working directory, perf-tests/clusterloader2 (kcm-controller-throughput Task).
+{{$assets := "../../kubernetes-iteration-toolkit/tests/assets/kcm-controller-throughput/endpointslice"}}
+{{$startFile := "/tmp/kcm-endpointslice-wave-start"}}
+{{$totalServices := MultiplyInt $namespaces $svcPerNamespace}}
+{{$reconcileLimit := MaxFloat 1 (DivideFloat $totalServices $ENDPOINTSLICE_THROUGHPUT_THRESHOLD)}}
+
+name: endpointslice-throughput
+namespace:
+  number: {{$namespaces}}
+  prefix: ep-test
+tuningSets:
+- name: Setup
+  qpsLoad:
+    qps: {{$setupQps}}
+steps:
+- name: Create test objects
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: {{$svcPerNamespace}}
+    tuningSet: Setup
+    objectBundle:
+    - basename: svc
+      objectTemplatePath: service.yaml
+    - basename: pa
+      objectTemplatePath: pod.yaml
+      templateFillMap:
+        Active: "true"
+        Role: pa
+    - basename: pb
+      objectTemplatePath: pod.yaml
+      templateFillMap:
+        Active: "true"
+        Role: pb
+    - basename: pc
+      objectTemplatePath: pod.yaml
+      templateFillMap:
+        Active: "true"
+        Role: pc
+- name: Wait for setup pods
+  measurements:
+  - Identifier: WaitForSetupPods
+    Method: WaitForRunningPods
+    Params:
+      desiredPodCount: {{MultiplyInt $totalServices 3}}
+      labelSelector: group = ep-test
+      timeout: {{$setupTimeout}}
+      isFatal: true
+- name: Wait for setup endpoints
+  measurements:
+  - Identifier: WaitForSetupEndpoints
+    Method: Exec
+    Params:
+      command: ["python3", "{{$assets}}/ep-wait.py", "{{$totalServices}}", "3", "{{$setupEndpointsTimeoutSeconds}}", "{{$setupEndpointsTimeoutSeconds}}"]
+      timeout: {{AddInt $setupEndpointsTimeoutSeconds 60}}s
+- name: Settle before load
+  measurements:
+  - Identifier: Settle
+    Method: Sleep
+    Params:
+      duration: {{$settle}}
+{{range $i := Loop $waves}}
+{{range $dir := StringSplit "down,up"}}
+{{$endpointsPerService := IfThenElse (eq $dir "up") 3 2}}
+- name: Scale {{$dir}} wave {{$i}}
+  measurements:
+  - Identifier: Flip{{$i}}{{$dir}}
+    Method: Exec
+    Params:
+      command: ["bash", "{{$assets}}/ep-flip.sh", "{{IfThenElse (eq $dir "up") "true" "false"}}", "ep-test", "{{$startFile}}"]
+      timeout: 10m
+- name: Reconcile wave {{$i}} {{$dir}}
+  measurements:
+  - Identifier: Wave{{$i}}{{$dir}}
+    Method: Exec
+    Params:
+      command: ["python3", "{{$assets}}/ep-wait.py", "{{$totalServices}}", "{{$endpointsPerService}}", "{{$reconcileLimit}}", "{{$waveTimeoutSeconds}}", "{{$startFile}}"]
+      timeout: {{AddInt $waveTimeoutSeconds 60}}s
+{{end}}
+{{end}}
+- name: Delete test objects
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: 0
+    tuningSet: Setup
+    objectBundle:
+    - basename: svc
+      objectTemplatePath: service.yaml
+    - basename: pa
+      objectTemplatePath: pod.yaml
+      templateFillMap:
+        Active: "true"
+        Role: pa
+    - basename: pb
+      objectTemplatePath: pod.yaml
+      templateFillMap:
+        Active: "true"
+        Role: pb
+    - basename: pc
+      objectTemplatePath: pod.yaml
+      templateFillMap:
+        Active: "true"
+        Role: pc

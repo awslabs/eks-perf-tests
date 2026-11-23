@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{.Name}}
+  labels:
+    group: deploy-test
+spec:
+  replicas: {{.Replicas}}
+  # revisionHistoryLimit: the default (10); the warm-up rollouts fill the history first
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      name: {{.Name}}
+  template:
+    metadata:
+      labels:
+        name: {{.Name}}
+        group: deploy-test
+        # The wave of the pod template, so the reconcile wait can count the new pods
+        wave: {{.Wave}}
+    spec:
+      # KWOK fake nodes only (eks-addon-kwok Task)
+      nodeSelector:
+        type: kwok
+      tolerations:
+      - key: kwok.x-k8s.io/node
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - image: registry.k8s.io/pause:3.9
+        name: pause
+        # Changing this value (and the wave label) starts a rollout
+        env:
+        - name: ROLLOUT_WAVE
+          value: "{{.Wave}}"
+        resources:
+          requests:
+            cpu: "1m"
+            memory: "8Mi"
+          limits:
+            cpu: "5m"
+            memory: "16Mi"

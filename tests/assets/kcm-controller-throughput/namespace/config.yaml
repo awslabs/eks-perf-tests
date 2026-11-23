@@ -1,0 +1,62 @@
+{{$namespaces := DefaultParam .CL2_NAMESPACES 500}}
+{{$objectsPerNamespace := DefaultParam .CL2_OBJECTS_PER_NAMESPACE 100}}
+{{$setupQps := DefaultParam .CL2_SETUP_QPS 100}}
+{{$settle := DefaultParam .CL2_SETTLE "5m"}}
+{{$deleteClients := DefaultParam .CL2_DELETE_CLIENTS 20}}
+{{$deleteTimeoutSeconds := DefaultParam .CL2_DELETE_TIMEOUT_SECONDS 3600}}
+
+{{$NAMESPACE_THROUGHPUT_THRESHOLD := DefaultParam .CL2_THROUGHPUT_THRESHOLD 0.1}}
+
+# 500 namespaces with 100 ConfigMaps and 100 Secrets each. Fills the test namespaces (not measured),
+# settles, then deletes every test namespace at once (ns-delete.sh: deleteClients kubectl processes in parallel) and
+# waits until all are gone. There are no waves; the delete is the measured step.
+# Gate: timed from the first delete. ns-delete.sh fails the run if the delete takes more than namespaces/threshold
+# seconds, and keeps waiting up to deleteTimeoutSeconds. Threshold 0.1 (5000 s for the 500 namespaces) leaves only that
+# ceiling (record only); threshold 1 would be a real 500 s limit.
+# The Exec step runs from CL2's working directory, perf-tests/clusterloader2 (kcm-controller-throughput Task).
+{{$deleteScript := "../../kubernetes-iteration-toolkit/tests/assets/kcm-controller-throughput/namespace/ns-delete.sh"}}
+{{$deleteLimit := MaxFloat 1 (DivideFloat $namespaces $NAMESPACE_THROUGHPUT_THRESHOLD)}}
+
+name: namespace-throughput
+namespace:
+  number: {{$namespaces}}
+  prefix: ns-test
+  # CL2's own cleanup waits as long as the delete step (default 10m), so a slow delete leaves no namespaces behind
+  # for the next iteration or controller
+  deleteNamespaceTimeout: {{$deleteTimeoutSeconds}}s
+tuningSets:
+- name: Setup
+  qpsLoad:
+    qps: {{$setupQps}}
+steps:
+- name: Create test objects
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: {{$objectsPerNamespace}}
+    tuningSet: Setup
+    objectBundle:
+    - basename: cm
+      objectTemplatePath: configmap.yaml
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: {{$objectsPerNamespace}}
+    tuningSet: Setup
+    objectBundle:
+    - basename: secret
+      objectTemplatePath: secret.yaml
+- name: Settle before delete
+  measurements:
+  - Identifier: Settle
+    Method: Sleep
+    Params:
+      duration: {{$settle}}
+- name: Delete test namespaces
+  measurements:
+  - Identifier: DeleteTestNamespaces
+    Method: Exec
+    Params:
+      command: ["bash", "{{$deleteScript}}", "ns-test", "{{$deleteClients}}", "{{$deleteLimit}}", "{{$deleteTimeoutSeconds}}"]
+      timeout: {{AddInt $deleteTimeoutSeconds 60}}s

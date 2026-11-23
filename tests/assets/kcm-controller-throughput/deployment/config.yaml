@@ -1,0 +1,146 @@
+{{$namespaces := DefaultParam .CL2_NAMESPACES 50}}
+{{$deploymentsPerNamespace := DefaultParam .CL2_OBJECTS_PER_NAMESPACE 100}}
+{{$replicas := DefaultParam .CL2_BASE_REPLICAS 2}}
+{{$setupQps := DefaultParam .CL2_SETUP_QPS 100}}
+{{$loadQps := DefaultParam .CL2_LOAD_QPS 1000}}
+{{$warmups := DefaultParam .CL2_WARMUP 10}}
+{{$waves := DefaultParam .CL2_WAVES 6}}
+{{$settle := DefaultParam .CL2_SETTLE "5m"}}
+{{$setupTimeout := DefaultParam .CL2_SETUP_TIMEOUT "20m"}}
+{{$waveTimeout := DefaultParam .CL2_WAVE_TIMEOUT "15m"}}
+
+{{$DEPLOYMENT_THROUGHPUT_THRESHOLD := DefaultParam .CL2_THROUGHPUT_THRESHOLD 1}}
+
+# Each wave is a rollout: it changes the pod template of every Deployment (maxSurge 1, maxUnavailable 0) at loadQps
+# patches per second, waits until all pods of the new template run, then until the old pods are gone. Warm-up
+# rollouts first fill the default revision history (10), so every measured rollout also deletes one old ReplicaSet.
+# Gate on the new pods, as in replicaset/config.yaml: tolerationTimeout gives them totalDeployments/threshold -
+# totalDeployments/loadQps seconds after the Scale step ends (in effect totalDeployments/threshold from its start); a
+# slower rollout fails the test, and CL2 waits up to waveTimeout; a rollout still not
+# done by then also fails the test, and the next one starts on top of it. The removal of the last old pods (the next
+# step) has only the waveTimeout ceiling. Threshold 1 leaves only the ceilings (record only). The setup wait is fatal.
+# The ReplicaSet controller creates the pods of every rollout, so this load measures the Deployment and ReplicaSet
+# controllers together.
+{{$totalDeployments := MultiplyInt $namespaces $deploymentsPerNamespace}}
+{{$totalPods := MultiplyInt $totalDeployments $replicas}}
+{{$reconcileLimit := MaxFloat 1 (SubtractFloat (DivideFloat $totalDeployments $DEPLOYMENT_THROUGHPUT_THRESHOLD) (DivideFloat $totalDeployments $loadQps))}}
+
+name: deployment-throughput
+namespace:
+  number: {{$namespaces}}
+tuningSets:
+- name: Setup
+  qpsLoad:
+    qps: {{$setupQps}}
+- name: Load
+  qpsLoad:
+    qps: {{$loadQps}}
+steps:
+- name: Create test objects
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: {{$deploymentsPerNamespace}}
+    tuningSet: Setup
+    objectBundle:
+    - basename: deploy
+      objectTemplatePath: deployment.yaml
+      templateFillMap:
+        Replicas: {{$replicas}}
+        Wave: setup
+- name: Wait for setup pods
+  measurements:
+  - Identifier: WaitForSetupPods
+    Method: WaitForRunningPods
+    Params:
+      desiredPodCount: {{$totalPods}}
+      labelSelector: group = deploy-test
+      timeout: {{$setupTimeout}}
+      isFatal: true
+{{range $i := Loop $warmups}}
+- name: Warmup rollout {{$i}}
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: {{$deploymentsPerNamespace}}
+    tuningSet: Load
+    objectBundle:
+    - basename: deploy
+      objectTemplatePath: deployment.yaml
+      templateFillMap:
+        Replicas: {{$replicas}}
+        Wave: warmup-{{$i}}
+- name: Warmup reconcile {{$i}}
+  measurements:
+  - Identifier: Warmup{{$i}}
+    Method: WaitForRunningPods
+    Params:
+      desiredPodCount: {{$totalPods}}
+      labelSelector: group = deploy-test, wave = warmup-{{$i}}
+      refreshInterval: 1s
+      timeout: {{$waveTimeout}}
+- name: Warmup old pods gone {{$i}}
+  measurements:
+  - Identifier: WarmupOldPods{{$i}}
+    Method: WaitForRunningPods
+    Params:
+      desiredPodCount: {{$totalPods}}
+      labelSelector: group = deploy-test
+      refreshInterval: 1s
+      timeout: {{$waveTimeout}}
+{{end}}
+- name: Settle before load
+  measurements:
+  - Identifier: Settle
+    Method: Sleep
+    Params:
+      duration: {{$settle}}
+{{range $i := Loop $waves}}
+- name: Scale rollout wave {{$i}}
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: {{$deploymentsPerNamespace}}
+    tuningSet: Load
+    objectBundle:
+    - basename: deploy
+      objectTemplatePath: deployment.yaml
+      templateFillMap:
+        Replicas: {{$replicas}}
+        Wave: wave-{{$i}}
+- name: Reconcile wave {{$i}} rollout
+  measurements:
+  - Identifier: Wave{{$i}}rollout
+    Method: WaitForRunningPods
+    Params:
+      desiredPodCount: {{$totalPods}}
+      labelSelector: group = deploy-test, wave = wave-{{$i}}
+      refreshInterval: 1s
+      tolerationTimeout: {{$reconcileLimit}}s
+      timeout: {{$waveTimeout}}
+- name: Old pods gone wave {{$i}} rollout
+  measurements:
+  - Identifier: OldPods{{$i}}rollout
+    Method: WaitForRunningPods
+    Params:
+      desiredPodCount: {{$totalPods}}
+      labelSelector: group = deploy-test
+      refreshInterval: 1s
+      timeout: {{$waveTimeout}}
+{{end}}
+- name: Delete test objects
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: 0
+    tuningSet: Setup
+    objectBundle:
+    - basename: deploy
+      objectTemplatePath: deployment.yaml
+      templateFillMap:
+        Replicas: {{$replicas}}
+        Wave: delete

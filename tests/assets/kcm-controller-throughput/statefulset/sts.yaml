@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{.Name}}
+  labels:
+    group: sts-test
+spec:
+  replicas: {{.Replicas}}
+  # Required; the headless Service need not exist (nothing here uses DNS).
+  serviceName: {{.Name}}
+  # The default policy: pods are created one at a time, each after the previous one is Ready.
+  podManagementPolicy: OrderedReady
+  # No volumeClaimTemplates: binding volumes would measure the storage provisioner, not the controller.
+  selector:
+    matchLabels:
+      name: {{.Name}}
+  template:
+    metadata:
+      labels:
+        name: {{.Name}}
+        group: sts-test
+    spec:
+      # KWOK fake nodes only (eks-addon-kwok Task)
+      nodeSelector:
+        type: kwok
+      tolerations:
+      - key: kwok.x-k8s.io/node
+        operator: Exists
+        effect: NoSchedule
+      terminationGracePeriodSeconds: 0
+      containers:
+      - image: registry.k8s.io/pause:3.9
+        name: pause
+        resources:
+          requests:
+            cpu: "1m"
+            memory: "8Mi"
+          limits:
+            cpu: "5m"
+            memory: "16Mi"

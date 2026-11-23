@@ -1,0 +1,100 @@
+{{$namespaces := DefaultParam .CL2_NAMESPACES 50}}
+{{$stsPerNamespace := DefaultParam .CL2_OBJECTS_PER_NAMESPACE 100}}
+{{$baseReplicas := DefaultParam .CL2_BASE_REPLICAS 2}}
+{{$setupQps := DefaultParam .CL2_SETUP_QPS 100}}
+{{$loadQps := DefaultParam .CL2_LOAD_QPS 1000}}
+{{$waves := DefaultParam .CL2_WAVES 10}}
+{{$settle := DefaultParam .CL2_SETTLE "5m"}}
+{{$setupTimeout := DefaultParam .CL2_SETUP_TIMEOUT "20m"}}
+{{$waveTimeout := DefaultParam .CL2_WAVE_TIMEOUT "5m"}}
+
+{{$STATEFULSET_THROUGHPUT_THRESHOLD := DefaultParam .CL2_THROUGHPUT_THRESHOLD 1}}
+
+# The ReplicaSet load on StatefulSets: each half-wave patches every StatefulSet once (base -> base+1 replicas, or
+# back) and waits until all pods run. With the default OrderedReady policy each change is one pod create or delete.
+# Gate as in replicaset/config.yaml: tolerationTimeout gives the pods totalStatefulSets/threshold -
+# totalStatefulSets/loadQps seconds after the Scale step ends (in effect totalStatefulSets/threshold from its start);
+# a slower half-wave fails the test, and CL2 waits up to waveTimeout; a half-wave still
+# not reconciled by then also fails the test, and the next one starts on top of it. Threshold 1 leaves only the
+# waveTimeout ceiling (record only).
+# The setup wait is fatal: CL2 stops if the setup pods are not all running within setupTimeout.
+{{$totalStatefulSets := MultiplyInt $namespaces $stsPerNamespace}}
+{{$reconcileLimit := MaxFloat 1 (SubtractFloat (DivideFloat $totalStatefulSets $STATEFULSET_THROUGHPUT_THRESHOLD) (DivideFloat $totalStatefulSets $loadQps))}}
+
+name: statefulset-throughput
+namespace:
+  number: {{$namespaces}}
+tuningSets:
+- name: Setup
+  qpsLoad:
+    qps: {{$setupQps}}
+- name: Load
+  qpsLoad:
+    qps: {{$loadQps}}
+steps:
+- name: Create test objects
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: {{$stsPerNamespace}}
+    tuningSet: Setup
+    objectBundle:
+    - basename: sts
+      objectTemplatePath: sts.yaml
+      templateFillMap:
+        Replicas: {{$baseReplicas}}
+- name: Wait for setup pods
+  measurements:
+  - Identifier: WaitForSetupPods
+    Method: WaitForRunningPods
+    Params:
+      desiredPodCount: {{MultiplyInt $totalStatefulSets $baseReplicas}}
+      labelSelector: group = sts-test
+      timeout: {{$setupTimeout}}
+      isFatal: true
+- name: Settle before load
+  measurements:
+  - Identifier: Settle
+    Method: Sleep
+    Params:
+      duration: {{$settle}}
+{{range $i := Loop $waves}}
+{{range $dir := StringSplit "up,down"}}
+{{$replicas := IfThenElse (eq $dir "up") (AddInt $baseReplicas 1) $baseReplicas}}
+- name: Scale {{$dir}} wave {{$i}}
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: {{$stsPerNamespace}}
+    tuningSet: Load
+    objectBundle:
+    - basename: sts
+      objectTemplatePath: sts.yaml
+      templateFillMap:
+        Replicas: {{$replicas}}
+- name: Reconcile wave {{$i}} {{$dir}}
+  measurements:
+  - Identifier: Wave{{$i}}{{$dir}}
+    Method: WaitForRunningPods
+    Params:
+      desiredPodCount: {{MultiplyInt $totalStatefulSets $replicas}}
+      labelSelector: group = sts-test
+      refreshInterval: 1s
+      tolerationTimeout: {{$reconcileLimit}}s
+      timeout: {{$waveTimeout}}
+{{end}}
+{{end}}
+- name: Delete test objects
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: 0
+    tuningSet: Setup
+    objectBundle:
+    - basename: sts
+      objectTemplatePath: sts.yaml
+      templateFillMap:
+        Replicas: {{$baseReplicas}}

@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{.Name}}
+  labels:
+    group: ep-test
+    svc: svc-{{.Index}}
+    role: {{.Role}}
+    # Changing this label adds the pod to its Service or removes it (no scheduling needed)
+    active: "{{.Active}}"
+spec:
+  # KWOK fake nodes only (eks-addon-kwok Task); KWOK sets the pod IP and Ready, so the pod becomes an endpoint
+  nodeSelector:
+    type: kwok
+  tolerations:
+  - key: kwok.x-k8s.io/node
+    operator: Exists
+    effect: NoSchedule
+  containers:
+  - image: registry.k8s.io/pause:3.9
+    name: pause
+    ports:
+    - containerPort: 8080
+    resources:
+      requests:
+        cpu: "1m"
+        memory: "8Mi"
+      limits:
+        cpu: "5m"
+        memory: "16Mi"

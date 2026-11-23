@@ -1,0 +1,68 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: eks-addon-kwok
+  namespace: scalability
+spec:
+  description: |
+    This task installs the KWOK addon on an EKS cluster and creates KWOK fake nodes.
+  params:
+  - name: cluster-name
+    description: The name of the EKS cluster you want to add addons for.
+  - name: desired-nodes
+    default: "1000"
+    description: The number of KWOK fake nodes to create.
+  - name: kwok-version
+    default: "v0.8.0"
+    description: The KWOK release to install.
+  workspaces:
+  - name: config
+    mountPath: /config/
+  stepTemplate:
+    env:
+    - name: KUBECONFIG
+      value: /config/kubeconfig
+  steps:
+  - name: create-kwok-addon
+    image: alpine/k8s:1.33.7
+    script: |
+      #kubectl commands are purely for knowing state of cluster before kicking off the test.
+      kubectl version
+      kubectl config current-context
+      #install kwok addon
+      # Download the KWOK release manifest, drop its FlowSchema (it uses the exempt priority level, which the cluster does not accept)
+      # and pin the controller to the tainted monitoring node before applying
+      curl -sfL https://github.com/kubernetes-sigs/kwok/releases/download/$(params.kwok-version)/kwok.yaml -o ./kwok.yaml
+      yq -i 'select(.kind != "FlowSchema")' ./kwok.yaml
+      yq -i '(select(.kind == "Deployment") | .spec.template.spec) += {"nodeSelector": {"eks.amazonaws.com/nodegroup": "monitoring-$(params.cluster-name)-nodes-1"}, "tolerations": [{"key": "monitoring", "operator": "Equal", "value": "true", "effect": "NoSchedule"}]}' ./kwok.yaml
+      kubectl apply -f ./kwok.yaml
+      kubectl wait --for=condition=Established crd/stages.kwok.x-k8s.io --timeout 1m
+      kubectl apply -f https://github.com/kubernetes-sigs/kwok/releases/download/$(params.kwok-version)/stage-fast.yaml
+      kubectl rollout status deployment kwok-controller -n kube-system --timeout 10m
+      # Create the fake nodes; KWOK manages nodes with its annotation, test pods select type=kwok and tolerate the taint.
+      # The kwok:// providerID stops the AWS cloud controller from deleting a fake node while it is not Ready.
+      for i in $(seq 1 $(params.desired-nodes)); do
+      cat <<EOL
+      ---
+      apiVersion: v1
+      kind: Node
+      metadata:
+        name: kwok-node-$i
+        annotations:
+          kwok.x-k8s.io/node: fake
+        labels:
+          type: kwok
+          kubernetes.io/arch: amd64
+          kubernetes.io/hostname: kwok-node-$i
+          kubernetes.io/os: linux
+      spec:
+        providerID: kwok://kwok-node-$i
+        taints:
+        - key: kwok.x-k8s.io/node
+          value: fake
+          effect: NoSchedule
+      EOL
+      done > ./kwok-nodes.yaml
+      kubectl apply -f ./kwok-nodes.yaml
+      kubectl wait --for=condition=Ready node -l type=kwok --timeout 10m
