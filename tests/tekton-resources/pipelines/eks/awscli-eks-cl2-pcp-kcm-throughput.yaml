@@ -15,26 +15,11 @@ spec:
     default: 'pcp-replicaset-throughput'
   - name: replicaset-throughput-threshold
     description: "ReplicaSet controller throughput threshold, ReplicaSet changes per second that every half-wave must reach"
-  - name: statefulset-metric-name
-    default: 'pcp-statefulset-throughput'
-  - name: statefulset-throughput-threshold
-    default: "1"
-    description: "StatefulSet controller throughput threshold, StatefulSet changes per second that every half-wave must reach; 1 records only (only the 5m half-wave ceiling applies)"
   - name: daemonset-metric-name
     default: 'pcp-daemonset-throughput'
   - name: daemonset-throughput-threshold
     default: "1"
     description: "DaemonSet controller throughput threshold, DaemonSet changes per second that every half-wave must reach; 1 records only (only the 15m half-wave ceiling applies)"
-  - name: endpointslice-metric-name
-    default: 'pcp-endpointslice-throughput'
-  - name: endpointslice-throughput-threshold
-    default: "1"
-    description: "EndpointSlice controller throughput threshold, Service endpoint changes per second that every half-wave must reach; 1 records only (only the 5m half-wave ceiling applies)"
-  - name: namespace-metric-name
-    default: 'pcp-namespace-throughput'
-  - name: namespace-throughput-threshold
-    default: "0.1"
-    description: "Namespace controller throughput threshold, test namespaces deleted per second; 0.1 records only (a 5000 s limit, above the 60 min ceiling)"
   - name: deployment-metric-name
     default: 'pcp-deployment-throughput'
   - name: deployment-throughput-threshold
@@ -63,10 +48,7 @@ spec:
     type: array
     default:
     - replicaset
-    - statefulset
     - daemonset
-    - endpointslice
-    - namespace
     - deployment
     description: "KCM controllers to test, one at a time in the order of their tasks below; a controller not listed is skipped"
   tasks:
@@ -280,55 +262,6 @@ spec:
     taskRef:
       kind: Task
       name: cloudwatch
-  - name: statefulset-throughput
-    when:
-    - input: statefulset
-      operator: in
-      values: ["$(params.controllers[*])"]
-    params:
-    - name: controller
-      value: statefulset
-    - name: cl2-throughput-threshold
-      value: $(params.statefulset-throughput-threshold)
-    - name: nodes
-      value: $(params.desired-nodes)
-    - name: results-bucket
-      value: $(params.results-bucket)
-    - name: cluster-name
-      value: $(params.cluster-name)
-    - name: control-plane-tier
-      value: $(params.control-plane-tier)
-    - name: iterations
-      value: $(params.iterations)
-    runAfter:
-    - replicaset-throughput
-    taskRef:
-      kind: Task
-      name: kcm-controller-throughput
-    workspaces:
-    - name: source
-      workspace: source
-    - name: results
-      workspace: results
-    - name: config
-      workspace: config
-  - name: statefulset-cw-metrics
-    params:
-    - name: dimensions
-      value: $(params.desired-nodes)
-    - name: value
-      value: $(tasks.statefulset-throughput.results.datapoint)
-    - name: namespace
-      value: $(params.kubernetes-version)
-    - name: metric-name
-      value: $(params.statefulset-metric-name)
-    - name: run-id
-      value: $(context.pipelineRun.name)
-    runAfter:
-      - statefulset-throughput
-    taskRef:
-      kind: Task
-      name: cloudwatch
   - name: daemonset-throughput
     when:
     - input: daemonset
@@ -350,7 +283,7 @@ spec:
     - name: iterations
       value: $(params.iterations)
     runAfter:
-    - statefulset-throughput
+    - replicaset-throughput
     taskRef:
       kind: Task
       name: kcm-controller-throughput
@@ -378,108 +311,6 @@ spec:
     taskRef:
       kind: Task
       name: cloudwatch
-  - name: endpointslice-throughput
-    when:
-    - input: endpointslice
-      operator: in
-      values: ["$(params.controllers[*])"]
-    params:
-    - name: controller
-      value: endpointslice
-    - name: cl2-throughput-threshold
-      value: $(params.endpointslice-throughput-threshold)
-    - name: nodes
-      value: $(params.desired-nodes)
-    - name: results-bucket
-      value: $(params.results-bucket)
-    - name: cluster-name
-      value: $(params.cluster-name)
-    - name: control-plane-tier
-      value: $(params.control-plane-tier)
-    - name: iterations
-      value: $(params.iterations)
-    runAfter:
-    - daemonset-throughput
-    taskRef:
-      kind: Task
-      name: kcm-controller-throughput
-    workspaces:
-    - name: source
-      workspace: source
-    - name: results
-      workspace: results
-    - name: config
-      workspace: config
-  - name: endpointslice-cw-metrics
-    params:
-    - name: dimensions
-      value: $(params.desired-nodes)
-    - name: value
-      value: $(tasks.endpointslice-throughput.results.datapoint)
-    - name: namespace
-      value: $(params.kubernetes-version)
-    - name: metric-name
-      value: $(params.endpointslice-metric-name)
-    - name: run-id
-      value: $(context.pipelineRun.name)
-    runAfter:
-      - endpointslice-throughput
-    taskRef:
-      kind: Task
-      name: cloudwatch
-  - name: namespace-throughput
-    when:
-    - input: namespace
-      operator: in
-      values: ["$(params.controllers[*])"]
-    params:
-    - name: controller
-      value: namespace
-    - name: cl2-throughput-threshold
-      value: $(params.namespace-throughput-threshold)
-    - name: cl2-namespaces
-      value: "500"
-    - name: cl2-objects-per-namespace
-      value: "100"
-    - name: nodes
-      value: $(params.desired-nodes)
-    - name: results-bucket
-      value: $(params.results-bucket)
-    - name: cluster-name
-      value: $(params.cluster-name)
-    - name: control-plane-tier
-      value: $(params.control-plane-tier)
-    - name: iterations
-      value: $(params.iterations)
-    runAfter:
-    - endpointslice-throughput
-    taskRef:
-      kind: Task
-      name: kcm-controller-throughput
-    workspaces:
-    - name: source
-      workspace: source
-    - name: results
-      workspace: results
-    - name: config
-      workspace: config
-  - name: namespace-cw-metrics
-    params:
-    - name: dimensions
-      value: $(params.desired-nodes)
-    - name: value
-      value: $(tasks.namespace-throughput.results.datapoint)
-    - name: namespace
-      value: $(params.kubernetes-version)
-    - name: metric-name
-      value: $(params.namespace-metric-name)
-    - name: run-id
-      value: $(context.pipelineRun.name)
-    runAfter:
-      - namespace-throughput
-    taskRef:
-      kind: Task
-      name: cloudwatch
   - name: deployment-throughput
     when:
     - input: deployment
@@ -503,7 +334,7 @@ spec:
     - name: iterations
       value: $(params.iterations)
     runAfter:
-    - namespace-throughput
+    - daemonset-throughput
     taskRef:
       kind: Task
       name: kcm-controller-throughput

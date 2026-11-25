@@ -13,7 +13,7 @@
 # The DaemonSets with index k (one per namespace) form group k and run on the KWOK nodes labeled kcm-ds-g<k>=on;
 # at base each group has 2 nodes (ds-nodes.sh base). Each half-wave labels 1 more node per group (up: every DaemonSet
 # creates 1 pod) or removes that label again (down: every DaemonSet deletes 1 pod), then waits until all pods run.
-# With 100 groups on 100 nodes a half-wave is 100 node label patches (kubectl, 25 at a time).
+# With 100 groups on 100 nodes a half-wave is 100 node label patches (kubectl, all at once).
 # Gate: tolerationTimeout gives the pods totalDaemonSets/threshold seconds from the end of the label step, so unlike a
 # ReplicaSet half-wave (timed in effect from the start of its Scale step) the label step's own few seconds are not
 # counted; otherwise as in replicaset/config.yaml: a half-wave still not reconciled at the waveTimeout ceiling also

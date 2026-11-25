@@ -13,23 +13,16 @@ case $OP in
 esac
 # Fewer than 3 nodes: the up node of a group would be one of its base nodes, and an up wave would add no pod.
 [[ $G =~ ^[0-9]+$ && $N =~ ^[0-9]+$ && $G -ge 1 && $N -ge 3 ]] || { echo "need at least 1 group and 3 nodes" >&2; exit 2; }
-# Reads "<node> <label args>" lines and runs one kubectl label per line, 25 at a time (xargs -P 25 -L 1; the
-# Task image's busybox xargs has no -L). Fails if any of them fails.
+# Reads "<node> <label args>" lines and runs one kubectl label per line, all at once (one process each, no cap, so
+# a half-wave is a burst of node updates as it can be in a real cluster). Fails if any of them fails.
 label() {
-  local line running=0 rc=0
+  local line p rc=0 pids=()
   while read -r line; do
-    if [ "$running" -ge 25 ]; then
-      wait -n || rc=1
-      running=$((running - 1))
-    fi
     # shellcheck disable=SC2086 # the line is "<node> <label args>", one word each
     kubectl label node --request-timeout=30s --overwrite -o name $line &
-    running=$((running + 1))
+    pids+=($!)
   done
-  while [ "$running" -gt 0 ]; do
-    wait -n || rc=1
-    running=$((running - 1))
-  done
+  for p in ${pids[@]+"${pids[@]}"}; do wait "$p" || rc=1; done
   return "$rc"
 }
 node() { echo "kwok-node-$(( $1 % N + 1 ))"; }
