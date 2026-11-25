@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: {{.Name}}
+  labels:
+    group: rs-test
+spec:
+  replicas: {{.Replicas}}
+  selector:
+    matchLabels:
+      name: {{.Name}}
+  template:
+    metadata:
+      labels:
+        name: {{.Name}}
+        group: rs-test
+    spec:
+      # KWOK fake nodes only (eks-addon-kwok Task)
+      nodeSelector:
+        type: kwok
+      tolerations:
+      - key: kwok.x-k8s.io/node
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - image: registry.k8s.io/pause:3.9
+        name: pause
+        resources:
+          requests:
+            cpu: "1m"
+            memory: "8Mi"
+          limits:
+            cpu: "5m"
+            memory: "16Mi"

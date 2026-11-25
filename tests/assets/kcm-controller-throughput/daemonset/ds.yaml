@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{.Name}}
+  labels:
+    group: ds-test
+    kcm-ds-group: g{{.Index}}
+spec:
+  selector:
+    matchLabels:
+      name: {{.Name}}
+  template:
+    metadata:
+      labels:
+        name: {{.Name}}
+        group: ds-test
+    spec:
+      # Group g<Index>: the DaemonSets with the same index in every namespace (one per namespace) run on the
+      # KWOK fake nodes labeled kcm-ds-g<Index>=on (ds-nodes.sh)
+      nodeSelector:
+        type: kwok
+        kcm-ds-g{{.Index}}: "on"
+      tolerations:
+      - key: kwok.x-k8s.io/node
+        operator: Exists
+        effect: NoSchedule
+      terminationGracePeriodSeconds: 0
+      containers:
+      - image: registry.k8s.io/pause:3.9
+        name: pause
+        resources:
+          requests:
+            cpu: "1m"
+            memory: "8Mi"
+          limits:
+            cpu: "5m"
+            memory: "16Mi"

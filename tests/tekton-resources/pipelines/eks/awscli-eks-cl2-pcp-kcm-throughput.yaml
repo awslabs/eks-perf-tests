@@ -1,0 +1,389 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: awscli-eks-cl2-pcp-kcm-throughput
+  namespace: scalability
+spec:
+  description: |
+    This pipeline sends slack notifcation before it spins up an EKS cluster with in it's own VPC 
+    and runs cl2 loadtest and upload results to s3 and tearsdown the cluster and sends slack notification.
+  params:
+  - name: cluster-name
+  - name: endpoint
+  - name: desired-nodes
+  - name: replicaset-metric-name
+    default: 'pcp-replicaset-throughput'
+  - name: replicaset-throughput-threshold
+    description: "ReplicaSet controller throughput threshold, ReplicaSet changes per second that every half-wave must reach"
+  - name: daemonset-metric-name
+    default: 'pcp-daemonset-throughput'
+  - name: daemonset-throughput-threshold
+    default: "1"
+    description: "DaemonSet controller throughput threshold, DaemonSet changes per second that every half-wave must reach; 1 records only (only the 15m half-wave ceiling applies)"
+  - name: deployment-metric-name
+    default: 'pcp-deployment-throughput'
+  - name: deployment-throughput-threshold
+    default: "1"
+    description: "Deployment controller throughput threshold, Deployment rollouts per second that every rollout wave must reach; 1 records only (only the 15m rollout ceiling applies)"
+  - name: results-bucket
+  - name: slack-hook
+  - name: slack-message
+  - name: vpc-cfn-url
+  - name: ng-cfn-url
+    default: "https://raw.githubusercontent.com/awslabs/eks-perf-tests/refs/heads/main/tests/assets/eks_node_group_launch_template_pcp.json"
+    type: string
+  - name: kubernetes-version
+    default: "1.33"
+  - name: service-role-cfn-url
+    default: "https://raw.githubusercontent.com/awslabs/kubernetes-iteration-toolkit/main/tests/assets/eks_service_role.json"
+  - name: node-role-cfn-url
+    default: "https://raw.githubusercontent.com/awslabs/kubernetes-iteration-toolkit/main/tests/assets/eks_node_role.json"
+  - name: control-plane-tier
+    default: "standard"
+    description: "Provisioned control plane tier, default standard"
+  - name: iterations
+    default: 3
+    description: "number of iterations to run each KCM controller throughput test for different tiers"
+  - name: controllers
+    type: array
+    default:
+    - replicaset
+    - daemonset
+    - deployment
+    description: "KCM controllers to test, one at a time in the order of their tasks below; a controller not listed is skipped"
+  tasks:
+  - name: slack-notification
+    params:
+    - name: slack-hook
+      value: $(params.slack-hook)
+    - name: slack-message
+      value: "$(params.slack-message) job kicked off"
+    taskRef:
+      kind: Task
+      name:  slack-notification
+  - name: awscli-vpc-create
+    params:
+    - name: stack-name
+      value: $(params.cluster-name)
+    - name: vpc-cfn-url
+      value: "$(params.vpc-cfn-url)"
+    taskRef:
+      kind: Task
+      name:  awscli-vpc-create
+  - name: create-cluster-service-role
+    params:
+    - name: stack-name
+      value: $(params.cluster-name)-service-role
+    - name: role-cfn-url
+      value: $(params.service-role-cfn-url)
+    - name: role-name
+      value: "$(params.cluster-name)-service-role"
+    taskRef:
+      kind: Task
+      name: awscli-role-create
+  - name: create-cluster-node-role
+    params:
+    - name: stack-name
+      value: $(params.cluster-name)-node-role
+    - name: role-cfn-url
+      value: $(params.node-role-cfn-url)
+    - name: role-name
+      value: "$(params.cluster-name)-node-role"
+    taskRef:
+      kind: Task
+      name: awscli-role-create
+  - name: create-eks-cluster
+    retries: 3 # the new API server name can take a few minutes to resolve; create is skipped when the cluster exists
+    params:
+    - name: cluster-name
+      value: $(params.cluster-name)
+    - name: service-role-name
+      value: "$(params.cluster-name)-service-role"
+    - name: endpoint
+      value: $(params.endpoint)
+    - name: vpc-stack-name
+      value: $(params.cluster-name)
+    - name: kubernetes-version
+      value: "$(params.kubernetes-version)"
+    - name: control-plane-tier
+      value: "$(params.control-plane-tier)"
+    runAfter:
+    - create-cluster-node-role
+    - create-cluster-service-role
+    - awscli-vpc-create
+    taskRef:
+      kind: Task
+      name: awscli-eks-cluster-create-with-pcp-stack
+    workspaces:
+    - name: config    
+      workspace: config
+  - name: create-cfn-launch-template
+    params:
+      - name: cluster-name
+        value: $(params.cluster-name)
+      - name: stack-name
+        value: $(params.cluster-name)-launch-template
+      - name: kubernetes-version
+        value: "$(params.kubernetes-version)"
+      - name: ng-cfn-url
+        value: "$(params.ng-cfn-url)"
+      - name: endpoint
+        value: $(params.endpoint)
+    runAfter:
+      - create-eks-cluster
+    taskRef:
+      kind: Task
+      name: awscli-eks-cfn-launch-template
+    workspaces:
+      - name: config
+        workspace: config
+  - name: create-mng-monitoring-nodes
+    params:
+    - name: cluster-name
+      value: $(params.cluster-name)
+    - name: host-cluster-node-role-name
+      value: "$(params.cluster-name)-node-role"
+    - name: endpoint
+      value: $(params.endpoint)
+    - name: desired-nodes
+      value: "1"
+    - name: max-nodes
+      value: "1"
+    - name: host-instance-types
+      value: "m5.8xlarge"
+    - name: host-taints
+      value: "key=monitoring,value=true,effect=NO_SCHEDULE"
+    - name: nodegroup-prefix
+      value: "monitoring-"
+    runAfter:
+    - create-cfn-launch-template
+    taskRef:
+      kind: Task
+      name:  awscli-eks-nodegroup-create
+    workspaces:
+    - name: config    
+      workspace: config
+  - name: install-fluentbit-addon
+    params:
+    - name: cluster-name
+      value: $(params.cluster-name)
+    runAfter:
+    - create-mng-monitoring-nodes
+    taskRef:
+      kind: Task
+      name: eks-addon-fluentbit
+    workspaces:
+    - name: config    
+      workspace: config
+  - name: scale-down-addons
+    params:
+    - name: cluster-name
+      value: $(params.cluster-name)
+    - name: coredns-replicas
+      value: "0"
+    - name: ebs-csi-replicas
+      value: "0"
+    - name: endpoint
+      value: $(params.endpoint)
+    runAfter:
+    - install-fluentbit-addon
+    taskRef:
+      kind: Task
+      name: scale-addons
+    workspaces:
+    - name: config
+      workspace: config
+  - name: install-kwok-addon
+    params:
+    - name: cluster-name
+      value: $(params.cluster-name)
+    - name: desired-nodes
+      value: $(params.desired-nodes)
+    runAfter:
+    - scale-down-addons
+    taskRef:
+      kind: Task
+      name: eks-addon-kwok
+    workspaces:
+    - name: config    
+      workspace: config
+  # One task pair per KCM controller, one controller at a time: <controller>-throughput runs after
+  # the previous controller's task, and <controller>-cw-metrics publishes its datapoint under the
+  # controller's own metric name. A failed CL2 run still lets the next controller run (datapoint 1);
+  # a failed task (an upload error, the 6h step timeout) stops the controllers after it.
+  # A controller not in the controllers param is skipped (its cw-metrics task too) and the next one runs.
+  # Bind the source and results workspaces as emptyDir: every controller task clones into source and writes results/<i>.
+  - name: replicaset-throughput
+    when:
+    - input: replicaset
+      operator: in
+      values: ["$(params.controllers[*])"]
+    params:
+    - name: controller
+      value: replicaset
+    - name: cl2-throughput-threshold
+      value: $(params.replicaset-throughput-threshold)
+    - name: nodes
+      value: $(params.desired-nodes)
+    - name: results-bucket
+      value: $(params.results-bucket)
+    - name: cluster-name
+      value: $(params.cluster-name)
+    - name: control-plane-tier
+      value: $(params.control-plane-tier)
+    - name: iterations
+      value: $(params.iterations)
+    runAfter:
+    - install-kwok-addon
+    taskRef:
+      kind: Task
+      name: kcm-controller-throughput
+    workspaces:
+    - name: source
+      workspace: source
+    - name: results
+      workspace: results
+    - name: config    
+      workspace: config
+  - name: replicaset-cw-metrics
+    params:
+    - name: dimensions
+      value: $(params.desired-nodes)
+    - name: value
+      value: $(tasks.replicaset-throughput.results.datapoint)
+    - name: namespace
+      value: $(params.kubernetes-version)
+    - name: metric-name
+      value: $(params.replicaset-metric-name)
+    - name: run-id
+      value: $(context.pipelineRun.name)
+    runAfter:
+      - replicaset-throughput
+    taskRef:
+      kind: Task
+      name: cloudwatch
+  - name: daemonset-throughput
+    when:
+    - input: daemonset
+      operator: in
+      values: ["$(params.controllers[*])"]
+    params:
+    - name: controller
+      value: daemonset
+    - name: cl2-throughput-threshold
+      value: $(params.daemonset-throughput-threshold)
+    - name: nodes
+      value: $(params.desired-nodes)
+    - name: results-bucket
+      value: $(params.results-bucket)
+    - name: cluster-name
+      value: $(params.cluster-name)
+    - name: control-plane-tier
+      value: $(params.control-plane-tier)
+    - name: iterations
+      value: $(params.iterations)
+    runAfter:
+    - replicaset-throughput
+    taskRef:
+      kind: Task
+      name: kcm-controller-throughput
+    workspaces:
+    - name: source
+      workspace: source
+    - name: results
+      workspace: results
+    - name: config
+      workspace: config
+  - name: daemonset-cw-metrics
+    params:
+    - name: dimensions
+      value: $(params.desired-nodes)
+    - name: value
+      value: $(tasks.daemonset-throughput.results.datapoint)
+    - name: namespace
+      value: $(params.kubernetes-version)
+    - name: metric-name
+      value: $(params.daemonset-metric-name)
+    - name: run-id
+      value: $(context.pipelineRun.name)
+    runAfter:
+      - daemonset-throughput
+    taskRef:
+      kind: Task
+      name: cloudwatch
+  - name: deployment-throughput
+    when:
+    - input: deployment
+      operator: in
+      values: ["$(params.controllers[*])"]
+    params:
+    - name: controller
+      value: deployment
+    - name: cl2-throughput-threshold
+      value: $(params.deployment-throughput-threshold)
+    - name: cl2-waves
+      value: "6"
+    - name: nodes
+      value: $(params.desired-nodes)
+    - name: results-bucket
+      value: $(params.results-bucket)
+    - name: cluster-name
+      value: $(params.cluster-name)
+    - name: control-plane-tier
+      value: $(params.control-plane-tier)
+    - name: iterations
+      value: $(params.iterations)
+    runAfter:
+    - daemonset-throughput
+    taskRef:
+      kind: Task
+      name: kcm-controller-throughput
+    workspaces:
+    - name: source
+      workspace: source
+    - name: results
+      workspace: results
+    - name: config
+      workspace: config
+  - name: deployment-cw-metrics
+    params:
+    - name: dimensions
+      value: $(params.desired-nodes)
+    - name: value
+      value: $(tasks.deployment-throughput.results.datapoint)
+    - name: namespace
+      value: $(params.kubernetes-version)
+    - name: metric-name
+      value: $(params.deployment-metric-name)
+    - name: run-id
+      value: $(context.pipelineRun.name)
+    runAfter:
+      - deployment-throughput
+    taskRef:
+      kind: Task
+      name: cloudwatch
+  finally:    
+  - name: teardown
+    retries: 10 # To deal with throttling during deletion
+    params:   
+    - name: cluster-name
+      value: $(params.cluster-name)
+    - name: endpoint
+      value: $(params.endpoint)
+    - name: slack-hook
+      value: $(params.slack-hook)
+    - name: slack-message
+      value: "$(params.slack-message) job completed"
+    - name: service-role-stack-name
+      value: $(params.cluster-name)-service-role
+    - name: node-role-stack-name
+      value: $(params.cluster-name)-node-role
+    - name: launch-template-stack-name
+      value: $(params.cluster-name)-launch-template
+    taskRef:
+      kind: Task
+      name:  awscli-eks-cluster-teardown
+  workspaces:
+  - name: source
+  - name: results
+  - name: config

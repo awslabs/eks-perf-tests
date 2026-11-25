@@ -1,0 +1,96 @@
+{{$namespaces := DefaultParam .CL2_NAMESPACES 50}}
+{{$rsPerNamespace := DefaultParam .CL2_OBJECTS_PER_NAMESPACE 100}}
+{{$baseReplicas := DefaultParam .CL2_BASE_REPLICAS 2}}
+{{$setupQps := DefaultParam .CL2_SETUP_QPS 100}}
+{{$loadQps := DefaultParam .CL2_LOAD_QPS 1000}}
+{{$waves := DefaultParam .CL2_WAVES 10}}
+{{$settle := DefaultParam .CL2_SETTLE "5m"}}
+{{$setupTimeout := DefaultParam .CL2_SETUP_TIMEOUT "20m"}}
+{{$waveTimeout := DefaultParam .CL2_WAVE_TIMEOUT "5m"}}
+
+{{$REPLICASET_THROUGHPUT_THRESHOLD := DefaultParam .CL2_THROUGHPUT_THRESHOLD 119}}
+
+# Each half-wave patches every ReplicaSet once (base -> base+1 replicas, or back) and waits until all pods run.
+# tolerationTimeout gives the pods totalReplicaSets/threshold - totalReplicaSets/loadQps seconds after the Scale
+# step ends; a slower half-wave fails the test, and CL2 waits up to waveTimeout so the next one starts reconciled.
+# The setup wait is fatal: CL2 stops if the setup pods are not all running within setupTimeout.
+{{$totalReplicaSets := MultiplyInt $namespaces $rsPerNamespace}}
+{{$reconcileLimit := MaxFloat 1 (SubtractFloat (DivideFloat $totalReplicaSets $REPLICASET_THROUGHPUT_THRESHOLD) (DivideFloat $totalReplicaSets $loadQps))}}
+
+name: replicaset-throughput
+namespace:
+  number: {{$namespaces}}
+tuningSets:
+- name: Setup
+  qpsLoad:
+    qps: {{$setupQps}}
+- name: Load
+  qpsLoad:
+    qps: {{$loadQps}}
+steps:
+- name: Create test objects
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: {{$rsPerNamespace}}
+    tuningSet: Setup
+    objectBundle:
+    - basename: rs
+      objectTemplatePath: rs.yaml
+      templateFillMap:
+        Replicas: {{$baseReplicas}}
+- name: Wait for setup pods
+  measurements:
+  - Identifier: WaitForSetupPods
+    Method: WaitForRunningPods
+    Params:
+      desiredPodCount: {{MultiplyInt $totalReplicaSets $baseReplicas}}
+      labelSelector: group = rs-test
+      timeout: {{$setupTimeout}}
+      isFatal: true
+- name: Settle before load
+  measurements:
+  - Identifier: Settle
+    Method: Sleep
+    Params:
+      duration: {{$settle}}
+{{range $i := Loop $waves}}
+{{range $dir := StringSplit "up,down"}}
+{{$replicas := IfThenElse (eq $dir "up") (AddInt $baseReplicas 1) $baseReplicas}}
+- name: Scale {{$dir}} wave {{$i}}
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: {{$rsPerNamespace}}
+    tuningSet: Load
+    objectBundle:
+    - basename: rs
+      objectTemplatePath: rs.yaml
+      templateFillMap:
+        Replicas: {{$replicas}}
+- name: Reconcile wave {{$i}} {{$dir}}
+  measurements:
+  - Identifier: Wave{{$i}}{{$dir}}
+    Method: WaitForRunningPods
+    Params:
+      desiredPodCount: {{MultiplyInt $totalReplicaSets $replicas}}
+      labelSelector: group = rs-test
+      refreshInterval: 1s
+      tolerationTimeout: {{$reconcileLimit}}s
+      timeout: {{$waveTimeout}}
+{{end}}
+{{end}}
+- name: Delete test objects
+  phases:
+  - namespaceRange:
+      min: 1
+      max: {{$namespaces}}
+    replicasPerNamespace: 0
+    tuningSet: Setup
+    objectBundle:
+    - basename: rs
+      objectTemplatePath: rs.yaml
+      templateFillMap:
+        Replicas: {{$baseReplicas}}
